@@ -1,0 +1,8 @@
+[package]
+name = "davies-chess"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ruci = { version = "2.1.0", features = ["gui-sync"] }
+shakmaty = "^0.27"
