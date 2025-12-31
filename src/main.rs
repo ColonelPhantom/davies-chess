@@ -22,9 +22,9 @@ use shakmaty::{CastlingMode, Chess, Position};
 use std::borrow::Cow;
 use std::io::{self, stdin, stdout};
 use std::io::{BufRead, Write};
-use std::thread::sleep;
-use std::time::Duration;
+use std::sync::atomic::AtomicU64;
 
+mod bench;
 mod search;
 // mod position;
 mod eval;
@@ -76,7 +76,8 @@ where
                 };
 
                 match moves.iter().try_fold(position, |mut position, r#move| {
-                    let r#move = r#move.to_move(&state.position)?;
+                    gui.send_string(&format!("applying move: {:?}", r#move)).unwrap();
+                    let r#move = r#move.to_move(&position)?;
                     position.play_unchecked(&r#move);
                     Ok::<Chess, IllegalUciMoveError>(position)
                 }) {
@@ -99,31 +100,34 @@ where
                 }
 
                 let depth = go.depth.unwrap_or(6);
-                let mut bestmove = None;
-                for d in 1..=depth {
-                    let (score, mut pv) = search::alphabeta(
-                        state.position.clone(), 
-                        d as isize, 
-                        -32000, 
-                        32000
-                    );
-                    pv.reverse();
-                    bestmove = pv.first().cloned();
-                    let uci_pv: Vec<_> = pv.iter().map(|m| m.to_uci(CastlingMode::Standard)).collect();
-                    let info = Info {
-                        depth: Some(Depth {
-                            depth: d,
-                            seldepth: None,
-                        }),
-                        pv: Cow::Owned(uci_pv),
-                        score: Some(ruci::ScoreWithBound {
-                            kind: ruci::Score::Centipawns(score as isize),
-                            bound: None,
-                        }),
-                        ..Default::default()
-                    };
-                    gui.send(info)?;
-                }
+                let mut count = search::NodeCount { nodes: 0, leaves: 0, qnodes: 0 };
+                let mut tt = Vec::new(); tt.resize_with(1 << 20, || AtomicU64::new(0));
+                let (score, mut pv) = search::alphabeta(
+                    state.position.clone(), 
+                    depth as isize, 
+                    -32000, 
+                    32000,
+                    &mut count,
+                    &mut tt,
+                );
+                pv.reverse();
+                let bestmove = pv.first().cloned();
+                let uci_pv: Vec<_> = pv.iter().map(|m| m.to_uci(CastlingMode::Standard)).collect();
+                let info = Info {
+                    depth: Some(Depth {
+                        depth: depth,
+                        seldepth: None,
+                    }),
+                    pv: Cow::Owned(uci_pv),
+                    score: Some(ruci::ScoreWithBound {
+                        kind: ruci::Score::Centipawns(score as isize),
+                        bound: None,
+                    }),
+                    nodes: Some((count.nodes) as usize),
+                    nps: Some(count.qnodes as usize),
+                    ..Default::default()
+                };
+                gui.send(info)?;
                 if let Some(mv) = bestmove {
                     let best_move = BestMove::Normal(NormalBestMove {
                         r#move: mv.to_uci(CastlingMode::Standard),
@@ -156,5 +160,10 @@ where
 }
 
 pub fn main() {
+    if std::env::args().any(|arg| arg == "bench") {
+        bench::bench();
+        return;
+    }
+
     engine(stdout().lock(), stdin().lock()).unwrap();
 }

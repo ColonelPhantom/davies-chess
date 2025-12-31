@@ -1,4 +1,4 @@
-use shakmaty::Position;
+use shakmaty::{Color, Position, Role, Square};
 
 // Taken from https://www.chessprogramming.org/Simplified_Evaluation_Function
 const PST: [[i16; 64]; 6] = [
@@ -75,29 +75,33 @@ const PST: [[i16; 64]; 6] = [
     ],
 ];
 
+pub fn eval_piece(sq: Square, color: Color, role: Role) -> i16 {
+    let base_piece_value = match role {
+        shakmaty::Role::Pawn => 100,
+        shakmaty::Role::Knight => 320,
+        shakmaty::Role::Bishop => 330,
+        shakmaty::Role::Rook => 500,
+        shakmaty::Role::Queen => 900,
+        shakmaty::Role::King => 0, // both sides have 1 king always
+    };
+
+    let piece_idx: usize = role.into();
+    let sq_idx: usize = if color == shakmaty::Color::White {
+        sq.flip_vertical().into()
+    } else {
+        sq.into()
+    };
+
+    let pst_value = PST[piece_idx - 1][sq_idx];
+    base_piece_value + pst_value
+}
+
 pub fn eval(position: &shakmaty::Chess) -> i16 {
     // Simple material evaluation
     let mut score = 0;
 
     for (sq, piece) in position.board() {
-        let base_piece_value = match piece.role {
-            shakmaty::Role::Pawn => 100,
-            shakmaty::Role::Knight => 320,
-            shakmaty::Role::Bishop => 330,
-            shakmaty::Role::Rook => 500,
-            shakmaty::Role::Queen => 900,
-            shakmaty::Role::King => 0, // both sides have 1 king always
-        };
-
-        let piece_idx: usize = piece.role.into();
-        let sq_idx: usize = if piece.color == shakmaty::Color::White {
-            sq.flip_vertical().into()
-        } else {
-            sq.into()
-        };
-
-        let pst_value = PST[piece_idx - 1][sq_idx];
-        let piece_value = base_piece_value + pst_value;
+        let piece_value = eval_piece(sq, piece.color, piece.role);
 
         if piece.color == position.turn() {
             score += piece_value;
