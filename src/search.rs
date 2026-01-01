@@ -178,12 +178,22 @@ fn alphabeta(
     return (best_value, pv);
 }
 
+fn convert_score(score: i16) -> ruci::Score {
+    if score > 32000 {
+        ruci::Score::MateIn((32701 - score as isize) / 2)
+    } else if score < -32000 {
+        ruci::Score::MateIn(-(32700 + score) as isize / 2)
+    } else {
+        ruci::Score::Centipawns(score as isize)
+    }
+}
+
 pub fn search(
     position: shakmaty::Chess,
     deadline: time::Deadline,
     tt: &Vec<AtomicU64>,
-    callback: &mut dyn FnMut(isize, i16, &Vec<Move>, &NodeCount),
-) -> (i16, Vec<Move>, NodeCount) {
+    callback: &mut dyn FnMut(isize, ruci::Score, &Vec<Move>, &NodeCount),
+) -> (ruci::Score, Vec<Move>, NodeCount) {
     let mut count = NodeCount {
         nodes: 0,
         leaves: 0,
@@ -193,10 +203,10 @@ pub fn search(
     let mut pv = Vec::new();
     for d in 0.. {
         (score, pv) = alphabeta(position.clone(), d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
-        callback(d, score, &pv, &count);
+        callback(d, convert_score(score), &pv, &count);
         if deadline.check_soft(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize, d as usize) {
             break;
         }
     }
-    (score, pv, count)
+    (convert_score(score), pv, count)
 }

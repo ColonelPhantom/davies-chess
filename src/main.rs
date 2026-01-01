@@ -123,7 +123,7 @@ where
                             }),
                             pv: Cow::Owned(pv.iter().rev().map(|m| m.to_uci(CastlingMode::Standard)).collect()),
                             score: Some(ruci::ScoreWithBound {
-                                kind: ruci::Score::Centipawns(score as isize),
+                                kind: score,
                                 bound: None,
                             }),
                             nodes: Some(nodes as usize),

@@ -17,7 +17,7 @@ pub fn bench() {
         let mut tt = Vec::new(); tt.resize_with(1 << 20, || AtomicU64::new(0));
         let (score, pv, count) = search(position, time::Deadline::Depth(depth as usize), &mut tt, &mut |_, _, _, _| {});
         println!("FEN: {}", fen);
-        println!("Depth: {}, Score: {}, Nodes: {}, Leaves: {}, QNodes: {}", depth, score, count.nodes, count.leaves, count.qnodes);
+        println!("Depth: {}, Score: {:?}, Nodes: {}, Leaves: {}, QNodes: {}", depth, score, count.nodes, count.leaves, count.qnodes);
         println!("Principal Variation:");
         for mv in pv {
             print!("{} ", mv);
