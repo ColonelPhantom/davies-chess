@@ -28,6 +28,7 @@ mod bench;
 mod search;
 // mod position;
 mod eval;
+mod time;
 
 struct State {
     position: Chess,
@@ -99,17 +100,22 @@ where
                     gui.send(null)?;
                 }
 
-                let depth = go.depth.unwrap_or(6);
+                let tc = time::TimeControl::from_ruci(state.position.turn(), &go);
+                let deadline = match tc {
+                    Some(tc) => time::Deadline::from_tc(&tc, std::time::Instant::now()),
+                    None => time::Deadline::Depth(6),
+                };
+
                 let starttime = std::time::Instant::now();
                 let mut tt = Vec::new(); tt.resize_with(1 << 20, || AtomicU64::new(0));
-                let (score, mut pv, count) = search::search(
+                let (_score, mut pv, _count) = search::search(
                     state.position.clone(), 
-                    depth as isize, 
+                    deadline,
                     &mut tt,
                     &mut |depth, score, pv, count| {
                         let elapsed = starttime.elapsed().as_millis() as u64;
                         let nodes = count.nodes + count.qnodes - count.leaves;
-                        let nps = nodes * 1000 / elapsed;
+                        let nps = nodes * 1000 / elapsed.max(1);
                         let info = Info {
                             depth: Some(Depth {
                                 depth: depth as usize,
@@ -122,6 +128,7 @@ where
                             }),
                             nodes: Some(nodes as usize),
                             nps: Some(nps as usize),
+                            time: Some(elapsed as usize),
                             ..Default::default()
                         };
                         gui.send(info).unwrap();

@@ -1,6 +1,6 @@
-use std::{cmp::min, sync::atomic::AtomicU64};
+use std::{cmp::min, sync::atomic::AtomicU64, time::Instant};
 
-use crate::eval::{eval, eval_piece};
+use crate::{eval::{eval, eval_piece}, time};
 use shakmaty::{Chess, Move, Position, zobrist::{Zobrist64, ZobristHash}};
 
 pub struct NodeCount {
@@ -134,7 +134,7 @@ fn alphabeta(
     let mut moves = position.legal_moves();
     if moves.is_empty() {
         if position.is_check() {
-            return (-10000 + (10 - depth) as i16, Vec::new());
+            return (-32700, Vec::new());
         } else {
             return (0, Vec::new());
         }
@@ -169,12 +169,18 @@ fn alphabeta(
         from: best_move.from().unwrap() as u8,
         to: best_move.to() as u8,
     });
+    if best_value < -32500  {
+        best_value += 1;
+    }
+    if best_value > 32500  {
+        best_value -= 1;
+    }
     return (best_value, pv);
 }
 
 pub fn search(
     position: shakmaty::Chess,
-    depth: isize,
+    deadline: time::Deadline,
     tt: &Vec<AtomicU64>,
     callback: &mut dyn FnMut(isize, i16, &Vec<Move>, &NodeCount),
 ) -> (i16, Vec<Move>, NodeCount) {
@@ -185,14 +191,12 @@ pub fn search(
     };
     let mut score = 0;
     let mut pv = Vec::new();
-    if depth > 0 {
-        for d in 1..=depth {
-            (score, pv) = alphabeta(position.clone(), d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
-            callback(d, score, &pv, &count);
+    for d in 0.. {
+        (score, pv) = alphabeta(position.clone(), d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
+        callback(d, score, &pv, &count);
+        if deadline.check_soft(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize, d as usize) {
+            break;
         }
-    } else {
-        (score, pv) = alphabeta(position.clone(), depth, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
-        callback(depth, score, &pv, &count);
     }
     (score, pv, count)
 }
