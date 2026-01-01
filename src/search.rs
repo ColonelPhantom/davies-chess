@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::{cmp::min, sync::atomic::AtomicU64};
 
 use crate::eval::{eval, eval_piece};
 use shakmaty::{Chess, Move, Position, zobrist::{Zobrist64, ZobristHash}};
@@ -120,7 +120,16 @@ pub fn alphabeta(
     }
 
     let zob: Zobrist64 = position.zobrist_hash(shakmaty::EnPassantMode::Legal);
-    let tt_entry = get_tt(tt, zob.0);
+    let tt_entry = get_tt(tt, zob.0).or_else(|| {
+        // internal iterative deepening
+        if depth >= 3 {
+            let depth_internal = min(depth - 2, 2);
+            alphabeta(position.clone(), depth_internal, alpha, beta, count, tt);
+            get_tt(tt, zob.0)
+        } else {
+            None
+        }
+    });
 
     let mut moves = position.legal_moves();
     if moves.is_empty() {
