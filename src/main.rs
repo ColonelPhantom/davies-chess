@@ -100,15 +100,32 @@ where
                 }
 
                 let depth = go.depth.unwrap_or(6);
-                let mut count = search::NodeCount { nodes: 0, leaves: 0, qnodes: 0 };
+                let starttime = std::time::Instant::now();
                 let mut tt = Vec::new(); tt.resize_with(1 << 20, || AtomicU64::new(0));
-                let (score, mut pv) = search::alphabeta(
+                let (score, mut pv, count) = search::search(
                     state.position.clone(), 
                     depth as isize, 
-                    -32000, 
-                    32000,
-                    &mut count,
                     &mut tt,
+                    &mut |depth, score, pv, count| {
+                        let elapsed = starttime.elapsed().as_millis() as u64;
+                        let nodes = count.nodes + count.qnodes - count.leaves;
+                        let nps = nodes * 1000 / elapsed;
+                        let info = Info {
+                            depth: Some(Depth {
+                                depth: depth as usize,
+                                seldepth: None,
+                            }),
+                            pv: Cow::Owned(pv.iter().map(|m| m.to_uci(CastlingMode::Standard)).collect()),
+                            score: Some(ruci::ScoreWithBound {
+                                kind: ruci::Score::Centipawns(score as isize),
+                                bound: None,
+                            }),
+                            nodes: Some(nodes as usize),
+                            nps: Some(nps as usize),
+                            ..Default::default()
+                        };
+                        gui.send(info).unwrap();
+                    }
                 );
                 pv.reverse();
                 let bestmove = pv.first().cloned();

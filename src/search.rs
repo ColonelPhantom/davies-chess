@@ -67,7 +67,7 @@ fn write_tt(tt: &Vec<AtomicU64>, key: u64, data: TTEntry) {
     tt[index].store(entry, std::sync::atomic::Ordering::Relaxed);
 }
 
-pub fn qsearch(
+fn qsearch(
     position: shakmaty::Chess,
     mut alpha: i16,
     beta: i16,
@@ -104,7 +104,7 @@ pub fn qsearch(
     return best;
 }
 
-pub fn alphabeta(
+fn alphabeta(
     position: shakmaty::Chess,
     depth: isize,
     mut alpha: i16,
@@ -170,4 +170,29 @@ pub fn alphabeta(
         to: best_move.to() as u8,
     });
     return (best_value, pv);
+}
+
+pub fn search(
+    position: shakmaty::Chess,
+    depth: isize,
+    tt: &Vec<AtomicU64>,
+    callback: &mut dyn FnMut(isize, i16, &Vec<Move>, &NodeCount),
+) -> (i16, Vec<Move>, NodeCount) {
+    let mut count = NodeCount {
+        nodes: 0,
+        leaves: 0,
+        qnodes: 0,
+    };
+    let mut score = 0;
+    let mut pv = Vec::new();
+    if depth > 0 {
+        for d in 1..=depth {
+            (score, pv) = alphabeta(position.clone(), d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
+            callback(d, score, &pv, &count);
+        }
+    } else {
+        (score, pv) = alphabeta(position.clone(), depth, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
+        callback(depth, score, &pv, &count);
+    }
+    (score, pv, count)
 }
