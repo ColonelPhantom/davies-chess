@@ -115,7 +115,7 @@ where
                                 depth: depth as usize,
                                 seldepth: None,
                             }),
-                            pv: Cow::Owned(pv.iter().map(|m| m.to_uci(CastlingMode::Standard)).collect()),
+                            pv: Cow::Owned(pv.iter().rev().map(|m| m.to_uci(CastlingMode::Standard)).collect()),
                             score: Some(ruci::ScoreWithBound {
                                 kind: ruci::Score::Centipawns(score as isize),
                                 bound: None,
@@ -129,22 +129,6 @@ where
                 );
                 pv.reverse();
                 let bestmove = pv.first().cloned();
-                let uci_pv: Vec<_> = pv.iter().map(|m| m.to_uci(CastlingMode::Standard)).collect();
-                let info = Info {
-                    depth: Some(Depth {
-                        depth: depth,
-                        seldepth: None,
-                    }),
-                    pv: Cow::Owned(uci_pv),
-                    score: Some(ruci::ScoreWithBound {
-                        kind: ruci::Score::Centipawns(score as isize),
-                        bound: None,
-                    }),
-                    nodes: Some((count.nodes) as usize),
-                    nps: Some(count.qnodes as usize),
-                    ..Default::default()
-                };
-                gui.send(info)?;
                 if let Some(mv) = bestmove {
                     let best_move = BestMove::Normal(NormalBestMove {
                         r#move: mv.to_uci(CastlingMode::Standard),
