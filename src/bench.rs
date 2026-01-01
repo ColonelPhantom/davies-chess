@@ -21,6 +21,7 @@ pub fn bench() {
         tt.resize_with(1 << 24, || AtomicU64::new(0));
         let (score, pv, count) = search(
             position,
+            Vec::new(),
             time::Deadline::Depth(depth as usize),
             &mut tt,
             &mut |_, _, _, _| {},

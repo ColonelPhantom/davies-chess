@@ -106,6 +106,7 @@ fn qsearch(
 
 fn alphabeta(
     position: shakmaty::Chess,
+    mut history: Vec<shakmaty::Chess>,
     depth: isize,
     mut alpha: i16,
     beta: i16,
@@ -124,12 +125,25 @@ fn alphabeta(
         // internal iterative deepening
         if depth >= 3 {
             let depth_internal = min(depth - 2, 2);
-            alphabeta(position.clone(), depth_internal, alpha, beta, count, tt);
+            alphabeta(position.clone(), history.clone(), depth_internal, alpha, beta, count, tt);
             get_tt(tt, zob.0)
         } else {
             None
         }
     });
+
+    // three-fold repetition draw detection
+    let reps = history.iter().filter(|h| **h == position).count();
+    if reps >= 2 {
+        // draw
+        return (0, Vec::new());
+    }
+    // fifty-move rule draw detection
+    if position.halfmoves() >= 100 {
+        return (0, Vec::new());
+    }
+    history.push(position.clone());
+
 
     let mut moves = position.legal_moves();
     if moves.is_empty() {
@@ -148,7 +162,8 @@ fn alphabeta(
     for mv in moves {
         let mut pos = position.clone();
         pos.play_unchecked(&mv);
-        let (score, sub_pv) = alphabeta(pos, depth - 1, -beta, -alpha, count, tt);
+        let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
+        let (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, count, tt);
         let score = -score;
         if score > best_value {
             best_value = score;
@@ -190,6 +205,7 @@ fn convert_score(score: i16) -> ruci::Score {
 
 pub fn search(
     position: shakmaty::Chess,
+    history: Vec<shakmaty::Chess>,
     deadline: time::Deadline,
     tt: &Vec<AtomicU64>,
     callback: &mut dyn FnMut(isize, ruci::Score, &Vec<Move>, &NodeCount),
@@ -202,7 +218,7 @@ pub fn search(
     let mut score = 0;
     let mut pv = Vec::new();
     for d in 0.. {
-        (score, pv) = alphabeta(position.clone(), d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
+        (score, pv) = alphabeta(position.clone(), history.clone(), d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
         callback(d, convert_score(score), &pv, &count);
         if deadline.check_soft(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize, d as usize) {
             break;

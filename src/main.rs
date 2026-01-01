@@ -32,6 +32,7 @@ mod time;
 
 struct State {
     position: Chess,
+    history: Vec<Chess>,
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -45,6 +46,7 @@ where
     let mut gui = Gui { engine, gui };
     let mut state = State {
         position: Chess::new(),
+        history: Vec::new(),
     };
 
     gui.send_string("engine started")?;
@@ -76,14 +78,14 @@ where
                     }
                 };
 
-                match moves.iter().try_fold(position, |mut position, r#move| {
-                    gui.send_string(&format!("applying move: {:?}", r#move)).unwrap();
+                match moves.iter().try_fold((position, Vec::new()), |(mut position, mut history), r#move| {
+                    history.push(position.clone());
                     let r#move = r#move.to_move(&position)?;
                     position.play_unchecked(&r#move);
-                    Ok::<Chess, IllegalUciMoveError>(position)
+                    Ok::<_, IllegalUciMoveError>((position, history))
                 }) {
-                    Ok(position) => {
-                        state.position = position;
+                    Ok((position, history)) => {
+                        state = State { position, history };
                         gui.send_string("position set")?;
                     }
                     Err(e) => {
@@ -110,6 +112,7 @@ where
                 let mut tt = Vec::new(); tt.resize_with(1 << 20, || AtomicU64::new(0));
                 let (_score, mut pv, _count) = search::search(
                     state.position.clone(), 
+                    state.history.clone(),
                     deadline,
                     &mut tt,
                     &mut |depth, score, pv, count| {
