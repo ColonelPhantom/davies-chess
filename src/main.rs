@@ -29,6 +29,7 @@ mod search;
 // mod position;
 mod eval;
 mod time;
+mod util;
 
 struct State {
     position: Chess,

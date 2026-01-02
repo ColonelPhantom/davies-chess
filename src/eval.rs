@@ -110,11 +110,11 @@ pub fn eval(position: &shakmaty::Chess) -> i16 {
         }
     }
 
-    let mobility = position.legal_moves().len() as i16;
-    let opp_mobility = position.clone().swap_turn().map(|p| p.legal_moves().len() as i16).unwrap_or(0);
+    // let mobility = position.legal_moves().len() as i16;
+    // let opp_mobility = position.clone().swap_turn().map(|p| p.legal_moves().len() as i16).unwrap_or(0);
 
-    score += 8 * mobility;
-    score -= 8 * opp_mobility;
+    // score += 5 * mobility;
+    // score -= 5 * opp_mobility;
 
     score
 }

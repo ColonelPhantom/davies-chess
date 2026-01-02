@@ -1,6 +1,6 @@
 use std::{cmp::min, sync::atomic::AtomicU64, time::Instant};
 
-use crate::{eval::{eval, eval_piece}, time};
+use crate::{eval::{eval, eval_piece}, time, util::sort::LazySort};
 use shakmaty::{Chess, Move, Position, zobrist::{Zobrist64, ZobristHash}};
 
 pub struct NodeCount {
@@ -9,67 +9,43 @@ pub struct NodeCount {
     pub qnodes: u64,
 }
 
-fn move_compare(pos: &Chess, tte: Option<TTEntry>, a: &Move, b: &Move) -> std::cmp::Ordering {
+// note: somewhat confusing, but for the inner values, lower is better
+// this is related to how sorting works (lower values earlier)
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum MoveOrderKey {
+    TTMove(i16),
+    Capture(i16, i16), // victim value, aggressor value
+    Quiet(i16),        // development value
+}
+
+fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move) -> MoveOrderKey {
     // TT-move first 
     if let Some(tte) = tte {
-        let a_tt: bool = (a.from().unwrap() as u8 == tte.from) && (a.to() as u8 == tte.to);
-        let b_tt = (b.from().unwrap() as u8 == tte.from) && (b.to() as u8 == tte.to);
-        match (a_tt, b_tt) {
-            // Should only be one true, except for promotions to different pieces; order Q>K>R>B
-            (true, true) => {
-                let a_prom = match a.promotion() {
-                    Some(shakmaty::Role::Queen) => 4,
-                    Some(shakmaty::Role::Rook) => 3,
-                    Some(shakmaty::Role::Bishop) => 2,
-                    Some(shakmaty::Role::Knight) => 1,
-                    _ => 0,
-                };
-                let b_prom = match b.promotion() {
-                    Some(shakmaty::Role::Queen) => 4,
-                    Some(shakmaty::Role::Rook) => 3,
-                    Some(shakmaty::Role::Bishop) => 2,
-                    Some(shakmaty::Role::Knight) => 1,
-                    _ => 0,
-                };
-                return b_prom.cmp(&a_prom);
-            }
-            (true, false) => return std::cmp::Ordering::Less,
-            (false, true) => return std::cmp::Ordering::Greater,
-            _ => {}
+        let is_tt: bool = (m.from().unwrap() as u8 == tte.from) && (m.to() as u8 == tte.to);
+        if is_tt {
+            return MoveOrderKey::TTMove(match m.promotion() {
+                Some(shakmaty::Role::Queen) => -4,
+                Some(shakmaty::Role::Rook) => -3,
+                Some(shakmaty::Role::Bishop) => -2,
+                Some(shakmaty::Role::Knight) => -1,
+                _ => 0,
+            });
         }
     }
 
-    let a_capture = a.capture();
-    let b_capture = b.capture();
-    match (a_capture, b_capture) {
-        (Some(ac), Some(bc)) => {
-            // for captures, order by MVV-LVA
-            let a_victim_value = eval_piece(a.to(), pos.turn().other(), ac);
-            let a_aggres_value = eval_piece(a.from().unwrap(), pos.turn(), pos.board().role_at(a.from().unwrap()).unwrap());
-
-            let b_victim_value = eval_piece(b.to(), pos.turn().other(), bc);
-            let b_aggres_value = eval_piece(b.from().unwrap(), pos.turn(), pos.board().role_at(b.from().unwrap()).unwrap());
-
-            b_victim_value.cmp(&a_victim_value).then(b_aggres_value.cmp(&a_aggres_value))
-        }
-        (Some(_), None) => std::cmp::Ordering::Less, // captures first
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => {
-            // for quiet moves, order by piece development (looking at PSQTs)
-            let a_role = pos.board().role_at(a.from().unwrap()).unwrap();
-            let a_role_to = a.promotion().unwrap_or(a_role);
-            let a_value_old = eval_piece(a.from().unwrap(), pos.turn(), a_role);
-            let a_value_new = eval_piece(a.to(), pos.turn(), a_role_to);
-            let a_devel = a_value_new - a_value_old;
-
-            let b_role = pos.board().role_at(b.from().unwrap()).unwrap();
-            let b_role_to = b.promotion().unwrap_or(b_role);
-            let b_value_old = eval_piece(b.from().unwrap(), pos.turn(), b_role);
-            let b_value_new = eval_piece(b.to(), pos.turn(), b_role_to);
-            let b_devel = b_value_new - b_value_old;
-
-            b_devel.cmp(&a_devel)
-        },
+    if let Some(captured) = m.capture() {
+        // for captures, order by MVV-LVA
+        let victim_value = eval_piece(m.to(), pos.turn().other(), captured);
+        let aggressor_value = eval_piece(m.from().unwrap(), pos.turn(), pos.board().role_at(m.from().unwrap()).unwrap());
+        MoveOrderKey::Capture(-victim_value, -aggressor_value)
+    } else {
+        // for quiet moves, order by piece development (looking at PSQTs)
+        let role = pos.board().role_at(m.from().unwrap()).unwrap();
+        let role_to = m.promotion().unwrap_or(role);
+        let value_old = eval_piece(m.from().unwrap(), pos.turn(), role);
+        let value_new = eval_piece(m.to(), pos.turn(), role_to);
+        let devel = value_new - value_old;
+        MoveOrderKey::Quiet(-devel)
     }
 }
 
@@ -110,7 +86,7 @@ fn get_tt(tt: &Vec<AtomicU64>, key: u64) -> Option<TTEntry> {
         let value = ((entry >> 16) & 0xFFFF) as i16;
         let from = ((entry >> 10) & 0x3F) as u8;
         let to = ((entry >> 4) & 0x3F) as u8;
-        let score_type = match ((entry >> 2) & 0x3) {
+        let score_type = match (entry >> 2) & 0x3  {
             0 => ScoreType::Exact,
             1 => ScoreType::LowerBound,
             2 => ScoreType::UpperBound,
@@ -156,8 +132,10 @@ fn qsearch(
         // Instead, assume checkmate unless a move can let us escape
         (position.legal_moves(), -32700) 
     };
-    moves.sort_unstable_by(|a,b| move_compare(&position, None, a, b));
+    // // moves.sort_by(|a,b| move_compare(&position, None, a, b));
+    // moves.sort_unstable_by_key(|m| move_key(&position, None, m));
 
+    let moves = LazySort::new(&moves, |m| move_key(&position, None, m));
     // TODO: move ordering, use SEE-pruning
     for mv in moves {
         let mut pos = position.clone();
@@ -245,7 +223,7 @@ fn alphabeta(
     history.push(position.clone());
 
 
-    let mut moves = position.legal_moves();
+    let moves = position.legal_moves();
     if moves.is_empty() {
         if position.is_check() {
             return (-32700, Vec::new());
@@ -254,15 +232,14 @@ fn alphabeta(
         }
     }
 
-    moves.sort_unstable_by(|a,b| move_compare(&position, tt_entry, a, b));
-
     let mut pv = Vec::new();
     let mut best_value = i16::MIN;
     let mut best_move = moves[0].clone();
     let mut node_type = NodeType::All;
+    let moves = LazySort::new(&moves, |m| move_key(&position, tt_entry, m));
     for mv in moves {
         let mut pos = position.clone();
-        pos.play_unchecked(&mv);
+        pos.play_unchecked(mv);
         let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
         let (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, count, tt);
         let score = -score;
@@ -272,14 +249,14 @@ fn alphabeta(
             if score > alpha {
                 alpha = score;
                 pv = sub_pv;
-                pv.push(mv);
+                pv.push(mv.clone());
                 node_type = NodeType::PV;
             }
-        }
-        if score >= beta {
-            // fail-soft
-            node_type = NodeType::Cut;
-            break;
+            if score >= beta {
+                // fail-soft
+                node_type = NodeType::Cut;
+                break;
+            }
         }
     }
 
