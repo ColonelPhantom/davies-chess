@@ -23,7 +23,7 @@ pub fn bench() {
             position,
             Vec::new(),
             time::Deadline::Depth(depth as usize),
-            &mut tt,
+            tt,
             &mut |_, _, _, _| {},
         );
         println!("FEN: {}", fen);
@@ -31,10 +31,10 @@ pub fn bench() {
             "Depth: {}, Score: {:?}, Nodes: {}, Leaves: {}, QNodes: {}, Total: {}",
             depth,
             score,
-            count.nodes,
-            count.leaves,
-            count.qnodes,
-            count.nodes + count.qnodes - count.leaves
+            count.nodes.load(std::sync::atomic::Ordering::Relaxed),
+            count.leaves.load(std::sync::atomic::Ordering::Relaxed),
+            count.qnodes.load(std::sync::atomic::Ordering::Relaxed),
+            count.count(),
         );
         println!("Principal Variation:");
         for mv in pv.iter().rev() {

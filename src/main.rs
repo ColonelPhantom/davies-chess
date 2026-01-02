@@ -115,10 +115,10 @@ where
                     state.position.clone(), 
                     state.history.clone(),
                     deadline,
-                    &mut tt,
+                    tt,
                     &mut |depth, score, pv, count| {
                         let elapsed = starttime.elapsed().as_millis() as u64;
-                        let nodes = count.nodes + count.qnodes - count.leaves;
+                        let nodes = count.count();
                         let nps = nodes * 1000 / elapsed.max(1);
                         let info = Info {
                             depth: Some(Depth {

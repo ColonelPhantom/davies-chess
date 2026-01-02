@@ -1,6 +1,6 @@
 use std::{
     cmp::min,
-    sync::atomic::{AtomicBool, AtomicU64},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
     time::Instant,
 };
 
@@ -15,14 +15,14 @@ use shakmaty::{
 };
 
 pub struct NodeCount {
-    pub nodes: u64,
-    pub leaves: u64,
-    pub qnodes: u64,
+    pub nodes: AtomicU64,
+    pub leaves: AtomicU64,
+    pub qnodes: AtomicU64,
 }
 
 impl NodeCount {
     pub fn count(&self) -> u64 {
-        self.nodes + self.qnodes - self.leaves
+        self.nodes.load(Relaxed) + self.qnodes.load(Relaxed) - self.leaves.load(Relaxed)
     }
 }
 
@@ -83,10 +83,9 @@ enum ScoreType {
 struct SearchState {
     tt: Vec<AtomicU64>,
     nodes: NodeCount,
+    deadline: time::Deadline,
     stop: AtomicBool,
 }
-
-struct ThreadState {}
 
 #[derive(Clone, Copy)]
 struct TTEntry {
@@ -151,14 +150,8 @@ fn write_tt(tt: &Vec<AtomicU64>, key: u64, data: TTEntry) {
     tt[index].store(entry, std::sync::atomic::Ordering::Relaxed);
 }
 
-fn qsearch(
-    position: shakmaty::Chess,
-    mut alpha: i16,
-    beta: i16,
-    count: &mut NodeCount,
-    tt: &Vec<AtomicU64>,
-) -> i16 {
-    count.qnodes += 1;
+fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &SearchState) -> i16 {
+    global.nodes.qnodes.fetch_add(1, Relaxed);
 
     let (moves, mut best) = if !position.is_check() {
         let best = eval(&position);
@@ -174,15 +167,12 @@ fn qsearch(
         // Instead, assume checkmate unless a move can let us escape
         (position.legal_moves(), -32700)
     };
-    // // moves.sort_by(|a,b| move_compare(&position, None, a, b));
-    // moves.sort_unstable_by_key(|m| move_key(&position, None, m));
 
     let moves = LazySort::new(&moves, |m| move_key(&position, None, m));
-    // TODO: move ordering, use SEE-pruning
     for mv in moves {
         let mut pos = position.clone();
         pos.play_unchecked(&mv);
-        let score = -qsearch(pos, -beta, -alpha, count, tt);
+        let score = -qsearch(pos, -beta, -alpha, global);
         if score >= beta {
             return score;
         }
@@ -205,23 +195,26 @@ enum NodeType {
 fn alphabeta(
     position: shakmaty::Chess,
     mut history: Vec<shakmaty::Chess>,
-    deadline: &time::Deadline,
     depth: isize,
     mut alpha: i16,
     beta: i16,
-    count: &mut NodeCount,
-    tt: &Vec<AtomicU64>,
+    global: &SearchState,
 ) -> (i16, Vec<Move>) {
-    count.nodes += 1;
+    // TODO: use atomics!
+    global.nodes.nodes.fetch_add(1, Relaxed);
 
     // Check if we are done; go to qsearch if so
     if depth <= 0 {
-        count.leaves += 1;
-        return (qsearch(position, alpha, beta, count, tt), Vec::new());
+        global.nodes.leaves.fetch_add(1, Relaxed);
+        return (qsearch(position, alpha, beta, global), Vec::new());
     }
 
     // Check if we are out of time
-    if depth >= 4 && deadline.check_hard(Instant::now(), count.count() as usize) {
+    if depth >= 4
+        && global
+            .deadline
+            .check_hard(Instant::now(), global.nodes.count() as usize)
+    {
         return (-32768, Vec::new());
     }
 
@@ -237,20 +230,18 @@ fn alphabeta(
 
     // Fetch TT entry, do IID if there is none
     let zob: Zobrist64 = position.zobrist_hash(shakmaty::EnPassantMode::Legal);
-    let tt_entry = get_tt(tt, &moves, zob.0).or_else(|| {
+    let tt_entry = get_tt(&global.tt, &moves, zob.0).or_else(|| {
         if depth >= 3 {
             let depth_internal = min(depth - 2, 2);
             alphabeta(
                 position.clone(),
                 history.clone(),
-                deadline,
                 depth_internal,
                 alpha,
                 beta,
-                count,
-                tt,
+                global,
             );
-            get_tt(tt, &moves, zob.0)
+            get_tt(&global.tt, &moves, zob.0)
         } else {
             None
         }
@@ -304,7 +295,7 @@ fn alphabeta(
         } else {
             history.clone()
         };
-        let (score, sub_pv) = alphabeta(pos, hist, deadline, depth - 1, -beta, -alpha, count, tt);
+        let (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, global);
         if score == -32768 {
             // out of time
             return (-32768, Vec::new());
@@ -328,7 +319,7 @@ fn alphabeta(
     }
 
     write_tt(
-        tt,
+        &global.tt,
         zob.0,
         TTEntry {
             from: best_move.from().unwrap() as u8,
@@ -365,32 +356,35 @@ pub fn search(
     position: shakmaty::Chess,
     history: Vec<shakmaty::Chess>,
     deadline: time::Deadline,
-    tt: &Vec<AtomicU64>,
+    tt: Vec<AtomicU64>,
     callback: &mut dyn FnMut(isize, ruci::Score, &Vec<Move>, &NodeCount),
 ) -> (ruci::Score, Vec<Move>, NodeCount) {
-    let mut count = NodeCount {
-        nodes: 0,
-        leaves: 0,
-        qnodes: 0,
-    };
     let mut score = eval(&position);
     let mut pv = Vec::new();
+    let global = SearchState {
+        tt,
+        nodes: NodeCount {
+            nodes: AtomicU64::new(0),
+            leaves: AtomicU64::new(0),
+            qnodes: AtomicU64::new(0),
+        },
+        deadline,
+        stop: AtomicBool::new(false),
+    };
     for d in 0.. {
         let asp_alpha = score - 50;
         let asp_beta = score + 50;
         let (asp_score, asp_pv) = alphabeta(
             position.clone(),
             history.clone(),
-            &deadline,
             d,
             asp_alpha,
             asp_beta,
-            &mut count,
-            tt,
+            &global,
         );
         if asp_score == -32768 {
             // out of time
-            callback(65534, convert_score(score), &pv, &count);
+            callback(65534, convert_score(score), &pv, &global.nodes);
             break;
         }
         let (new_score, new_pv) = if asp_score > asp_alpha && asp_score < asp_beta {
@@ -401,35 +395,26 @@ pub fn search(
             let alpha = if asp_score <= asp_alpha { i16::MIN + 1 } else { asp_alpha };
             #[rustfmt::skip]
             let beta = if asp_score >= asp_beta { i16::MAX - 1 } else { asp_beta };
-            let (sc, pv) = alphabeta(
-                position.clone(),
-                history.clone(),
-                &deadline,
-                d,
-                alpha,
-                beta,
-                &mut count,
-                tt,
-            );
+            let (sc, pv) = alphabeta(position.clone(), history.clone(), d, alpha, beta, &global);
             if sc == -32768 {
                 // out of time
-                callback(65535, convert_score(score), &pv, &count);
+                callback(65535, convert_score(score), &pv, &global.nodes);
                 break;
             }
             (sc, pv)
         };
         score = new_score;
         pv = new_pv;
-        callback(d, convert_score(score), &pv, &count);
+        callback(d, convert_score(score), &pv, &global.nodes);
         if !pv.is_empty()
-            && deadline.check_soft(
+            && global.deadline.check_soft(
                 Instant::now(),
-                (count.nodes + count.qnodes - count.leaves) as usize,
+                (global.nodes.count()) as usize,
                 d as usize,
             )
         {
             break;
         }
     }
-    (convert_score(score), pv, count)
+    (convert_score(score), pv, global.nodes)
 }
