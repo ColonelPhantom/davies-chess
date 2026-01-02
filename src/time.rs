@@ -53,15 +53,15 @@ impl Deadline {
             TimeControl::FixedDepth(d) => Deadline::Depth(*d),
             TimeControl::FixedNodes(n) => Deadline::Nodes(*n),
             TimeControl::FixedTime(t) => {
-                let soft = start + std::time::Duration::from_millis((*t as u64) / 2);
-                let hard = start + std::time::Duration::from_millis(*t as u64);
+                let soft = start + std::time::Duration::from_millis(*t as u64 - 100);
+                let hard = start + std::time::Duration::from_millis(*t as u64 - 25);
                 Deadline::Time(soft, hard)
             },
             TimeControl::Infinite => Deadline::None,
             TimeControl::Clock { time_ms, increment_ms, moves_to_go } => {
                 let moves = moves_to_go.unwrap_or(20);
-                let time_soft = time_ms / (moves + 10) + increment_ms / 5;
-                let time_hard= time_ms / moves + increment_ms;
+                let time_soft = (time_ms / moves + increment_ms) / 2;
+                let time_hard= time_ms / (moves / 2 + 1) + increment_ms;
                 let soft_time = start + std::time::Duration::from_millis(time_soft as u64);
                 let hard_time = start + std::time::Duration::from_millis(time_hard as u64);
                 Deadline::Time(soft_time, hard_time)

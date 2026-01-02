@@ -118,7 +118,7 @@ fn qsearch(
 ) -> i16 {
     count.qnodes += 1;
 
-    let (mut moves, mut best) = if !position.is_check() {
+    let (moves, mut best) = if !position.is_check() {
         let best = eval(&position);
         if best >= beta {
             return best;
@@ -163,6 +163,7 @@ enum NodeType {
 fn alphabeta(
     position: shakmaty::Chess,
     mut history: Vec<shakmaty::Chess>,
+    deadline: &time::Deadline,
     depth: isize,
     mut alpha: i16,
     beta: i16,
@@ -176,12 +177,17 @@ fn alphabeta(
         return (qsearch(position, alpha, beta, count, tt), Vec::new());
     }
 
+    if depth >= 4 && deadline.check_hard(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize, depth as usize) {
+        // out of time
+        return (-32768, Vec::new());
+    }
+
     let zob: Zobrist64 = position.zobrist_hash(shakmaty::EnPassantMode::Legal);
     let tt_entry = get_tt(tt, zob.0).or_else(|| {
         // internal iterative deepening
         if depth >= 3 {
             let depth_internal = min(depth - 2, 2);
-            alphabeta(position.clone(), history.clone(), depth_internal, alpha, beta, count, tt);
+            alphabeta(position.clone(), history.clone(), deadline, depth_internal, alpha, beta, count, tt);
             get_tt(tt, zob.0)
         } else {
             None
@@ -241,7 +247,11 @@ fn alphabeta(
         let mut pos = position.clone();
         pos.play_unchecked(mv);
         let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
-        let (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, count, tt);
+        let (score, sub_pv) = alphabeta(pos, hist, deadline, depth - 1, -beta, -alpha, count, tt);
+        if score == -32768  {
+            // out of time
+            return (-32768, Vec::new());
+        }
         let score = -score;
         if score > best_value {
             best_value = score;
@@ -305,7 +315,13 @@ pub fn search(
     let mut score = 0;
     let mut pv = Vec::new();
     for d in 0.. {
-        (score, pv) = alphabeta(position.clone(), history.clone(), d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
+        let (new_score, new_pv) = alphabeta(position.clone(), history.clone(), &deadline, d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
+        if new_score == -32768 {
+            // out of time
+            break;
+        }
+        score = new_score;
+        pv = new_pv;
         callback(d, convert_score(score), &pv, &count);
         if !pv.is_empty() && deadline.check_soft(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize, d as usize) {
             break;
