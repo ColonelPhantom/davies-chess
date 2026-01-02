@@ -1,7 +1,18 @@
-use std::{cmp::min, sync::atomic::{AtomicBool, AtomicU64}, time::Instant};
+use std::{
+    cmp::min,
+    sync::atomic::{AtomicBool, AtomicU64},
+    time::Instant,
+};
 
-use crate::{eval::{eval, eval_piece}, time, util::sort::LazySort};
-use shakmaty::{Chess, Move, Position, zobrist::{Zobrist64, ZobristHash}};
+use crate::{
+    eval::{eval, eval_piece},
+    time,
+    util::sort::LazySort,
+};
+use shakmaty::{
+    Chess, Move, Position,
+    zobrist::{Zobrist64, ZobristHash},
+};
 
 pub struct NodeCount {
     pub nodes: u64,
@@ -23,8 +34,10 @@ fn move_match_tt(m: &Move, tte: &TTEntry) -> bool {
 }
 
 fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move) -> MoveOrderKey {
-    // TT-move first 
-    if let Some(tte) = tte && move_match_tt(m, &tte) {
+    // TT-move first
+    if let Some(tte) = tte
+        && move_match_tt(m, &tte)
+    {
         return MoveOrderKey::TTMove(match m.promotion() {
             Some(shakmaty::Role::Queen) => -4,
             Some(shakmaty::Role::Rook) => -3,
@@ -37,7 +50,11 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move) -> MoveOrderKey {
     if let Some(captured) = m.capture() {
         // for captures, order by MVV-LVA
         let victim_value = eval_piece(m.to(), pos.turn().other(), captured);
-        let aggressor_value = eval_piece(m.from().unwrap(), pos.turn(), pos.board().role_at(m.from().unwrap()).unwrap());
+        let aggressor_value = eval_piece(
+            m.from().unwrap(),
+            pos.turn(),
+            pos.board().role_at(m.from().unwrap()).unwrap(),
+        );
         MoveOrderKey::Capture(-victim_value, -aggressor_value)
     } else {
         // for quiet moves, order by piece development (looking at PSQTs)
@@ -63,9 +80,7 @@ struct SearchState {
     stop: AtomicBool,
 }
 
-struct ThreadState {
-
-}
+struct ThreadState {}
 
 #[derive(Clone, Copy)]
 struct TTEntry {
@@ -88,7 +103,6 @@ struct TTEntry {
 // 2 bits: score type
 // 2 bits: free!
 
-
 fn get_tt(tt: &Vec<AtomicU64>, key: u64) -> Option<TTEntry> {
     let index = (key % tt.len() as u64) as usize;
     let entry = tt[index].load(std::sync::atomic::Ordering::Relaxed);
@@ -97,13 +111,19 @@ fn get_tt(tt: &Vec<AtomicU64>, key: u64) -> Option<TTEntry> {
         let value = ((entry >> 16) & 0xFFFF) as i16;
         let from = ((entry >> 10) & 0x3F) as u8;
         let to = ((entry >> 4) & 0x3F) as u8;
-        let score_type = match (entry >> 2) & 0x3  {
+        let score_type = match (entry >> 2) & 0x3 {
             0 => ScoreType::Exact,
             1 => ScoreType::LowerBound,
             2 => ScoreType::UpperBound,
             _ => unreachable!(),
         };
-        Some(TTEntry {from, to, value, depth, score_type})
+        Some(TTEntry {
+            from,
+            to,
+            value,
+            depth,
+            score_type,
+        })
     } else {
         None
     }
@@ -141,7 +161,7 @@ fn qsearch(
     } else {
         // If checked, search all moves and forbid standing pat
         // Instead, assume checkmate unless a move can let us escape
-        (position.legal_moves(), -32700) 
+        (position.legal_moves(), -32700)
     };
     // // moves.sort_by(|a,b| move_compare(&position, None, a, b));
     // moves.sort_unstable_by_key(|m| move_key(&position, None, m));
@@ -188,7 +208,12 @@ fn alphabeta(
         return (qsearch(position, alpha, beta, count, tt), Vec::new());
     }
 
-    if depth >= 4 && deadline.check_hard(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize) {
+    if depth >= 4
+        && deadline.check_hard(
+            Instant::now(),
+            (count.nodes + count.qnodes - count.leaves) as usize,
+        )
+    {
         // out of time
         return (-32768, Vec::new());
     }
@@ -198,7 +223,16 @@ fn alphabeta(
         // internal iterative deepening
         if depth >= 3 {
             let depth_internal = min(depth - 2, 2);
-            alphabeta(position.clone(), history.clone(), deadline, depth_internal, alpha, beta, count, tt);
+            alphabeta(
+                position.clone(),
+                history.clone(),
+                deadline,
+                depth_internal,
+                alpha,
+                beta,
+                count,
+                tt,
+            );
             get_tt(tt, zob.0)
         } else {
             None
@@ -214,10 +248,11 @@ fn alphabeta(
         }
     }
 
-
     // note: we should always have a tt_entry! IID makes sure we have one
     // to make sure it is valid by more than the key, we check if the stored move is legal here
-    if let Some(tte) = tt_entry && moves.iter().any(|m| move_match_tt(m, &tte)) {
+    if let Some(tte) = tt_entry
+        && moves.iter().any(|m| move_match_tt(m, &tte))
+    {
         if tte.depth as isize >= depth {
             // We can use the TT score, depending on if it's compatible with our alpha/beta window
             // TODO: fix pv handling for tt-cutoffs
@@ -225,15 +260,15 @@ fn alphabeta(
                 ScoreType::Exact => {
                     // TODO: this cuts off PV, and might be wrong?
                     return (tte.value, Vec::new());
-                },
+                }
                 ScoreType::LowerBound if tte.value >= beta => {
                     // We know that at least one move is better than beta; cut
                     return (tte.value, Vec::new());
-                },
+                }
                 ScoreType::UpperBound if tte.value < alpha => {
                     // We know that no moves will raise alpha; cut
                     return (tte.value, Vec::new());
-                },
+                }
                 _ => {}
             }
         }
@@ -251,7 +286,6 @@ fn alphabeta(
     }
     history.push(position.clone());
 
-
     let mut pv = Vec::new();
     let mut best_value = i16::MIN;
     let mut best_move = moves[0].clone();
@@ -260,9 +294,13 @@ fn alphabeta(
     for mv in moves {
         let mut pos = position.clone();
         pos.play_unchecked(mv);
-        let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
+        let hist = if mv.is_zeroing() {
+            Vec::new()
+        } else {
+            history.clone()
+        };
         let (score, sub_pv) = alphabeta(pos, hist, deadline, depth - 1, -beta, -alpha, count, tt);
-        if score == -32768  {
+        if score == -32768 {
             // out of time
             return (-32768, Vec::new());
         }
@@ -284,21 +322,25 @@ fn alphabeta(
         }
     }
 
-    write_tt(tt, zob.0, TTEntry {
-        from: best_move.from().unwrap() as u8,
-        to: best_move.to() as u8,
-        depth: depth as u8,
-        value: best_value,
-        score_type: match node_type {
-            NodeType::PV => ScoreType::Exact,
-            NodeType::Cut => ScoreType::LowerBound,
-            NodeType::All => ScoreType::UpperBound,
+    write_tt(
+        tt,
+        zob.0,
+        TTEntry {
+            from: best_move.from().unwrap() as u8,
+            to: best_move.to() as u8,
+            depth: depth as u8,
+            value: best_value,
+            score_type: match node_type {
+                NodeType::PV => ScoreType::Exact,
+                NodeType::Cut => ScoreType::LowerBound,
+                NodeType::All => ScoreType::UpperBound,
+            },
         },
-    });
-    if best_value < -32500  {
+    );
+    if best_value < -32500 {
         best_value += 1;
     }
-    if best_value > 32500  {
+    if best_value > 32500 {
         best_value -= 1;
     }
     return (best_value, pv);
@@ -331,7 +373,16 @@ pub fn search(
     for d in 0.. {
         let asp_alpha = score - 50;
         let asp_beta = score + 50;
-        let (asp_score, asp_pv) = alphabeta(position.clone(), history.clone(), &deadline, d, asp_alpha, asp_beta, &mut count, tt);
+        let (asp_score, asp_pv) = alphabeta(
+            position.clone(),
+            history.clone(),
+            &deadline,
+            d,
+            asp_alpha,
+            asp_beta,
+            &mut count,
+            tt,
+        );
         if asp_score == -32768 {
             callback(65534, convert_score(score), &pv, &count);
             break;
@@ -339,9 +390,26 @@ pub fn search(
         let (new_score, new_pv) = if asp_score > asp_alpha && asp_score < asp_beta {
             (asp_score, asp_pv)
         } else {
-            let alpha = if asp_score <= asp_alpha { i16::MIN + 1 } else { asp_alpha };
-            let beta = if asp_score >= asp_beta { i16::MAX - 1 } else { asp_beta };
-            let (sc, pv) = alphabeta(position.clone(), history.clone(), &deadline, d, alpha, beta, &mut count, tt);
+            let alpha = if asp_score <= asp_alpha {
+                i16::MIN + 1
+            } else {
+                asp_alpha
+            };
+            let beta = if asp_score >= asp_beta {
+                i16::MAX - 1
+            } else {
+                asp_beta
+            };
+            let (sc, pv) = alphabeta(
+                position.clone(),
+                history.clone(),
+                &deadline,
+                d,
+                alpha,
+                beta,
+                &mut count,
+                tt,
+            );
             if sc == -32768 {
                 // out of time
                 callback(65535, convert_score(score), &pv, &count);
@@ -352,7 +420,13 @@ pub fn search(
         score = new_score;
         pv = new_pv;
         callback(d, convert_score(score), &pv, &count);
-        if !pv.is_empty() && deadline.check_soft(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize, d as usize) {
+        if !pv.is_empty()
+            && deadline.check_soft(
+                Instant::now(),
+                (count.nodes + count.qnodes - count.leaves) as usize,
+                d as usize,
+            )
+        {
             break;
         }
     }
