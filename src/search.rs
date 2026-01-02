@@ -122,18 +122,8 @@ fn get_tt(tt: &Vec<AtomicU64>, moves: &[Move], key: u64) -> Option<TTEntry> {
             2 => ScoreType::UpperBound,
             _ => unreachable!(),
         };
-        let entry = TTEntry {
-            from,
-            to,
-            value,
-            depth,
-            score_type,
-        };
-        if moves.iter().any(|m| move_match_tt(m, &entry)) {
-            Some(entry)
-        } else {
-            None
-        }
+        let entry = TTEntry { from, to, value, depth, score_type };
+        if moves.iter().any(|m| move_match_tt(m, &entry)) { Some(entry) } else { None }
     } else {
         None
     }
@@ -198,22 +188,20 @@ fn alphabeta(
     depth: isize,
     mut alpha: i16,
     beta: i16,
-    global: &SearchState,
+    g: &SearchState,
 ) -> (i16, Vec<Move>) {
-    // TODO: use atomics!
-    global.nodes.nodes.fetch_add(1, Relaxed);
+    g.nodes.nodes.fetch_add(1, Relaxed);
 
     // Check if we are done; go to qsearch if so
     if depth <= 0 {
-        global.nodes.leaves.fetch_add(1, Relaxed);
-        return (qsearch(position, alpha, beta, global), Vec::new());
+        g.nodes.leaves.fetch_add(1, Relaxed);
+        return (qsearch(position, alpha, beta, g), Vec::new());
     }
 
     // Check if we are out of time
-    if depth >= 4
-        && global
-            .deadline
-            .check_hard(Instant::now(), global.nodes.count() as usize)
+    if g.deadline
+        .check_hard(Instant::now(), g.nodes.count() as usize)
+        || g.stop.load(Relaxed)
     {
         return (-32768, Vec::new());
     }
@@ -230,7 +218,7 @@ fn alphabeta(
 
     // Fetch TT entry, do IID if there is none
     let zob: Zobrist64 = position.zobrist_hash(shakmaty::EnPassantMode::Legal);
-    let tt_entry = get_tt(&global.tt, &moves, zob.0).or_else(|| {
+    let tt_entry = get_tt(&g.tt, &moves, zob.0).or_else(|| {
         if depth >= 3 {
             let depth_internal = min(depth - 2, 2);
             alphabeta(
@@ -239,15 +227,15 @@ fn alphabeta(
                 depth_internal,
                 alpha,
                 beta,
-                global,
+                g,
             );
-            get_tt(&global.tt, &moves, zob.0)
+            get_tt(&g.tt, &moves, zob.0)
         } else {
             None
         }
     });
 
-    // If we have a valid TT entry, with enough depth, we can potentially use its score
+    // If we have a valid TT entry, with enough depth, we can potentially use its score (TT-cut)
     if let Some(tte) = tt_entry
         && tte.depth as isize >= depth
     {
@@ -290,12 +278,8 @@ fn alphabeta(
     for mv in moves {
         let mut pos = position.clone();
         pos.play_unchecked(mv);
-        let hist = if mv.is_zeroing() {
-            Vec::new()
-        } else {
-            history.clone()
-        };
-        let (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, global);
+        let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
+        let (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, g);
         if score == -32768 {
             // out of time
             return (-32768, Vec::new());
@@ -319,7 +303,7 @@ fn alphabeta(
     }
 
     write_tt(
-        &global.tt,
+        &g.tt,
         zob.0,
         TTEntry {
             from: best_move.from().unwrap() as u8,
