@@ -74,22 +74,49 @@ fn move_compare(pos: &Chess, tte: Option<TTEntry>, a: &Move, b: &Move) -> std::c
 }
 
 #[derive(Clone, Copy)]
+enum ScoreType {
+    Exact = 0,
+    LowerBound = 1,
+    UpperBound = 2,
+}
+
+#[derive(Clone, Copy)]
 struct TTEntry {
     // basic best-move info
     from: u8,
     to: u8,
 
     // TODO: value info etc
+    value: i16,
+    depth: u8,
+    score_type: ScoreType,
 }
+
+// TT-Entry bitmap:
+// 24 bits: high part of zobrist key (useful up to 2^40 entries, after that some bits become redundant with index; maybe use buckets at some point?)
+// 8 bits: search depth
+// 16 bits: score
+// 6 bits: from square
+// 6 bits: to square
+// 2 bits: score type
+// 2 bits: free!
+
 
 fn get_tt(tt: &Vec<AtomicU64>, key: u64) -> Option<TTEntry> {
     let index = (key % tt.len() as u64) as usize;
     let entry = tt[index].load(std::sync::atomic::Ordering::Relaxed);
-    if entry >> 32 == (key >> 32) {
-        Some(TTEntry {
-            from: ((entry >> 24) & 0xFF) as u8,
-            to: ((entry >> 16) & 0xFF) as u8,
-        })
+    if entry >> 40 == (key >> 40) {
+        let depth = ((entry >> 32) & 0xFF) as u8;
+        let value = ((entry >> 16) & 0xFFFF) as i16;
+        let from = ((entry >> 10) & 0x3F) as u8;
+        let to = ((entry >> 4) & 0x3F) as u8;
+        let score_type = match ((entry >> 2) & 0x3) {
+            0 => ScoreType::Exact,
+            1 => ScoreType::LowerBound,
+            2 => ScoreType::UpperBound,
+            _ => unreachable!(),
+        };
+        Some(TTEntry {from, to, value, depth, score_type})
     } else {
         None
     }
@@ -97,7 +124,12 @@ fn get_tt(tt: &Vec<AtomicU64>, key: u64) -> Option<TTEntry> {
 
 fn write_tt(tt: &Vec<AtomicU64>, key: u64, data: TTEntry) {
     let index = (key % tt.len() as u64) as usize;
-    let entry = (key & 0xFFFFFFFF00000000) | ((data.from as u64) << 24) | ((data.to as u64) << 16);
+    let entry = (key & 0xFFFFFF0000000000) // basically << 40 but keeping the high part
+        | ((data.depth as u64) << 32)
+        | ((data.value.cast_unsigned() as u64) << 16)
+        | ((data.from as u64) << 10)
+        | ((data.to as u64) << 4)
+        | ((data.score_type as u64) << 2);
     tt[index].store(entry, std::sync::atomic::Ordering::Relaxed);
 }
 
@@ -144,6 +176,12 @@ fn qsearch(
     return best;
 }
 
+enum NodeType {
+    PV,
+    Cut,
+    All,
+}
+
 fn alphabeta(
     position: shakmaty::Chess,
     mut history: Vec<shakmaty::Chess>,
@@ -172,6 +210,28 @@ fn alphabeta(
         }
     });
 
+    // note: we should always have a tt_entry! IID makes sure we have one
+    if let Some(tte) = tt_entry {
+        if tte.depth as isize >= depth {
+            // We can use the TT score, depending on if it's compatible with our alpha/beta window
+            // TODO: fix pv handling for tt-cutoffs
+            match tte.score_type {
+                ScoreType::Exact => {
+                    return (tte.value, Vec::new());
+                },
+                ScoreType::LowerBound if tte.value >= beta => {
+                    // We know that at least one move is better than beta; cut
+                    return (tte.value, Vec::new());
+                },
+                ScoreType::UpperBound if tte.value < alpha => {
+                    // We know that no moves will raise alpha; cut
+                    return (tte.value, Vec::new());
+                },
+                _ => {}
+            }
+        }
+    }
+
     // three-fold repetition draw detection
     let reps = history.iter().filter(|h| **h == position).count();
     if reps >= 2 {
@@ -199,6 +259,7 @@ fn alphabeta(
     let mut pv = Vec::new();
     let mut best_value = i16::MIN;
     let mut best_move = moves[0].clone();
+    let mut node_type = NodeType::All;
     for mv in moves {
         let mut pos = position.clone();
         pos.play_unchecked(&mv);
@@ -212,10 +273,12 @@ fn alphabeta(
                 alpha = score;
                 pv = sub_pv;
                 pv.push(mv);
+                node_type = NodeType::PV;
             }
         }
         if score >= beta {
             // fail-soft
+            node_type = NodeType::Cut;
             break;
         }
     }
@@ -223,6 +286,13 @@ fn alphabeta(
     write_tt(tt, zob.0, TTEntry {
         from: best_move.from().unwrap() as u8,
         to: best_move.to() as u8,
+        depth: depth as u8,
+        value: best_value,
+        score_type: match node_type {
+            NodeType::PV => ScoreType::Exact,
+            NodeType::Cut => ScoreType::LowerBound,
+            NodeType::All => ScoreType::UpperBound,
+        },
     });
     if best_value < -32500  {
         best_value += 1;
