@@ -109,15 +109,21 @@ fn qsearch(
     tt: &Vec<AtomicU64>,
 ) -> i16 {
     count.qnodes += 1;
-    let eval = eval(&position);
-    let mut best = eval;
-    if best >= beta {
-        return best;
-    }
-    if best > alpha {
-        alpha = best;
-    }
-    let mut moves = position.capture_moves();
+
+    let (mut moves, mut best) = if !position.is_check() {
+        let best = eval(&position);
+        if best >= beta {
+            return best;
+        }
+        if best > alpha {
+            alpha = best;
+        }
+        (position.capture_moves(), best)
+    } else {
+        // If checked, search all moves and forbid standing pat
+        // Instead, assume checkmate unless a move can let us escape
+        (position.legal_moves(), -32700) 
+    };
     moves.sort_unstable_by(|a,b| move_compare(&position, None, a, b));
 
     // TODO: move ordering, use SEE-pruning
