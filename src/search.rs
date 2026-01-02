@@ -10,10 +10,29 @@ pub struct NodeCount {
 }
 
 fn move_compare(pos: &Chess, tte: Option<TTEntry>, a: &Move, b: &Move) -> std::cmp::Ordering {
+    // TT-move first 
     if let Some(tte) = tte {
         let a_tt: bool = (a.from().unwrap() as u8 == tte.from) && (a.to() as u8 == tte.to);
         let b_tt = (b.from().unwrap() as u8 == tte.from) && (b.to() as u8 == tte.to);
         match (a_tt, b_tt) {
+            // Should only be one true, except for promotions to different pieces; order Q>K>R>B
+            (true, true) => {
+                let a_prom = match a.promotion() {
+                    Some(shakmaty::Role::Queen) => 4,
+                    Some(shakmaty::Role::Rook) => 3,
+                    Some(shakmaty::Role::Bishop) => 2,
+                    Some(shakmaty::Role::Knight) => 1,
+                    _ => 0,
+                };
+                let b_prom = match b.promotion() {
+                    Some(shakmaty::Role::Queen) => 4,
+                    Some(shakmaty::Role::Rook) => 3,
+                    Some(shakmaty::Role::Bishop) => 2,
+                    Some(shakmaty::Role::Knight) => 1,
+                    _ => 0,
+                };
+                return b_prom.cmp(&a_prom);
+            }
             (true, false) => return std::cmp::Ordering::Less,
             (false, true) => return std::cmp::Ordering::Greater,
             _ => {}
@@ -24,7 +43,7 @@ fn move_compare(pos: &Chess, tte: Option<TTEntry>, a: &Move, b: &Move) -> std::c
     let b_capture = b.capture();
     match (a_capture, b_capture) {
         (Some(ac), Some(bc)) => {
-            // let a_value = piece_value(ac);
+            // for captures, order by MVV-LVA
             let a_victim_value = eval_piece(a.to(), pos.turn().other(), ac);
             let a_aggres_value = eval_piece(a.from().unwrap(), pos.turn(), pos.board().role_at(a.from().unwrap()).unwrap());
 
@@ -35,7 +54,22 @@ fn move_compare(pos: &Chess, tte: Option<TTEntry>, a: &Move, b: &Move) -> std::c
         }
         (Some(_), None) => std::cmp::Ordering::Less, // captures first
         (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => std::cmp::Ordering::Equal,
+        (None, None) => {
+            // for quiet moves, order by piece development (looking at PSQTs)
+            let a_role = pos.board().role_at(a.from().unwrap()).unwrap();
+            let a_role_to = a.promotion().unwrap_or(a_role);
+            let a_value_old = eval_piece(a.from().unwrap(), pos.turn(), a_role);
+            let a_value_new = eval_piece(a.to(), pos.turn(), a_role_to);
+            let a_devel = a_value_new - a_value_old;
+
+            let b_role = pos.board().role_at(b.from().unwrap()).unwrap();
+            let b_role_to = b.promotion().unwrap_or(b_role);
+            let b_value_old = eval_piece(b.from().unwrap(), pos.turn(), b_role);
+            let b_value_new = eval_piece(b.to(), pos.turn(), b_role_to);
+            let b_devel = b_value_new - b_value_old;
+
+            b_devel.cmp(&a_devel)
+        },
     }
 }
 
