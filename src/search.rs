@@ -20,6 +20,12 @@ pub struct NodeCount {
     pub qnodes: u64,
 }
 
+impl NodeCount {
+    pub fn count(&self) -> u64 {
+        self.nodes + self.qnodes - self.leaves
+    }
+}
+
 // note: somewhat confusing, but for the inner values, lower is better
 // this is related to how sorting works (lower values earlier)
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -103,7 +109,7 @@ struct TTEntry {
 // 2 bits: score type
 // 2 bits: free!
 
-fn get_tt(tt: &Vec<AtomicU64>, key: u64) -> Option<TTEntry> {
+fn get_tt(tt: &Vec<AtomicU64>, moves: &[Move], key: u64) -> Option<TTEntry> {
     let index = (key % tt.len() as u64) as usize;
     let entry = tt[index].load(std::sync::atomic::Ordering::Relaxed);
     if entry >> 40 == (key >> 40) {
@@ -117,13 +123,18 @@ fn get_tt(tt: &Vec<AtomicU64>, key: u64) -> Option<TTEntry> {
             2 => ScoreType::UpperBound,
             _ => unreachable!(),
         };
-        Some(TTEntry {
+        let entry = TTEntry {
             from,
             to,
             value,
             depth,
             score_type,
-        })
+        };
+        if moves.iter().any(|m| move_match_tt(m, &entry)) {
+            Some(entry)
+        } else {
+            None
+        }
     } else {
         None
     }
@@ -202,25 +213,31 @@ fn alphabeta(
     tt: &Vec<AtomicU64>,
 ) -> (i16, Vec<Move>) {
     count.nodes += 1;
+
+    // Check if we are done; go to qsearch if so
     if depth <= 0 {
-        // TODO: add qsearch
         count.leaves += 1;
         return (qsearch(position, alpha, beta, count, tt), Vec::new());
     }
 
-    if depth >= 4
-        && deadline.check_hard(
-            Instant::now(),
-            (count.nodes + count.qnodes - count.leaves) as usize,
-        )
-    {
-        // out of time
+    // Check if we are out of time
+    if depth >= 4 && deadline.check_hard(Instant::now(), count.count() as usize) {
         return (-32768, Vec::new());
     }
 
+    // Generate moves; detect checkmate/stalemate
+    let moves = position.legal_moves();
+    if moves.is_empty() {
+        if position.is_check() {
+            return (-32700, Vec::new());
+        } else {
+            return (0, Vec::new());
+        }
+    }
+
+    // Fetch TT entry, do IID if there is none
     let zob: Zobrist64 = position.zobrist_hash(shakmaty::EnPassantMode::Legal);
-    let tt_entry = get_tt(tt, zob.0).or_else(|| {
-        // internal iterative deepening
+    let tt_entry = get_tt(tt, &moves, zob.0).or_else(|| {
         if depth >= 3 {
             let depth_internal = min(depth - 2, 2);
             alphabeta(
@@ -233,44 +250,32 @@ fn alphabeta(
                 count,
                 tt,
             );
-            get_tt(tt, zob.0)
+            get_tt(tt, &moves, zob.0)
         } else {
             None
         }
     });
 
-    let moves = position.legal_moves();
-    if moves.is_empty() {
-        if position.is_check() {
-            return (-32700, Vec::new());
-        } else {
-            return (0, Vec::new());
-        }
-    }
-
-    // note: we should always have a tt_entry! IID makes sure we have one
-    // to make sure it is valid by more than the key, we check if the stored move is legal here
+    // If we have a valid TT entry, with enough depth, we can potentially use its score
     if let Some(tte) = tt_entry
-        && moves.iter().any(|m| move_match_tt(m, &tte))
+        && tte.depth as isize >= depth
     {
-        if tte.depth as isize >= depth {
-            // We can use the TT score, depending on if it's compatible with our alpha/beta window
-            // TODO: fix pv handling for tt-cutoffs
-            match tte.score_type {
-                ScoreType::Exact => {
-                    // TODO: this cuts off PV, and might be wrong?
-                    return (tte.value, Vec::new());
-                }
-                ScoreType::LowerBound if tte.value >= beta => {
-                    // We know that at least one move is better than beta; cut
-                    return (tte.value, Vec::new());
-                }
-                ScoreType::UpperBound if tte.value < alpha => {
-                    // We know that no moves will raise alpha; cut
-                    return (tte.value, Vec::new());
-                }
-                _ => {}
+        // We can use the TT score, depending on if it's compatible with our alpha/beta window
+        // TODO: fix pv handling for tt-cutoffs
+        match tte.score_type {
+            ScoreType::Exact => {
+                // TODO: this cuts off PV, and might be wrong?
+                return (tte.value, Vec::new());
             }
+            ScoreType::LowerBound if tte.value >= beta => {
+                // We know that at least one move is better than beta; cut
+                return (tte.value, Vec::new());
+            }
+            ScoreType::UpperBound if tte.value < alpha => {
+                // We know that no moves will raise alpha; cut
+                return (tte.value, Vec::new());
+            }
+            _ => {}
         }
     }
 
@@ -384,22 +389,18 @@ pub fn search(
             tt,
         );
         if asp_score == -32768 {
+            // out of time
             callback(65534, convert_score(score), &pv, &count);
             break;
         }
         let (new_score, new_pv) = if asp_score > asp_alpha && asp_score < asp_beta {
             (asp_score, asp_pv)
         } else {
-            let alpha = if asp_score <= asp_alpha {
-                i16::MIN + 1
-            } else {
-                asp_alpha
-            };
-            let beta = if asp_score >= asp_beta {
-                i16::MAX - 1
-            } else {
-                asp_beta
-            };
+            // TODO: what if search fails a second time?
+            #[rustfmt::skip]
+            let alpha = if asp_score <= asp_alpha { i16::MIN + 1 } else { asp_alpha };
+            #[rustfmt::skip]
+            let beta = if asp_score >= asp_beta { i16::MAX - 1 } else { asp_beta };
             let (sc, pv) = alphabeta(
                 position.clone(),
                 history.clone(),
