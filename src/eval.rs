@@ -96,6 +96,7 @@ pub fn eval_piece(sq: Square, color: Color, role: Role) -> i16 {
     base_piece_value + pst_value
 }
 
+#[inline(never)]
 pub fn eval(position: &shakmaty::Chess) -> i16 {
     // Simple material evaluation
     let mut score = 0;
