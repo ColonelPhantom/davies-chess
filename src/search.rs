@@ -254,7 +254,7 @@ pub fn search(
     for d in 0.. {
         (score, pv) = alphabeta(position.clone(), history.clone(), d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
         callback(d, convert_score(score), &pv, &count);
-        if deadline.check_soft(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize, d as usize) {
+        if !pv.is_empty() && deadline.check_soft(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize, d as usize) {
             break;
         }
     }
