@@ -223,6 +223,7 @@ fn alphabeta(
             // TODO: fix pv handling for tt-cutoffs
             match tte.score_type {
                 ScoreType::Exact => {
+                    // TODO: this cuts off PV, and might be wrong?
                     return (tte.value, Vec::new());
                 },
                 ScoreType::LowerBound if tte.value >= beta => {
@@ -325,15 +326,29 @@ pub fn search(
         leaves: 0,
         qnodes: 0,
     };
-    let mut score = 0;
+    let mut score = eval(&position);
     let mut pv = Vec::new();
     for d in 0.. {
-        let (new_score, new_pv) = alphabeta(position.clone(), history.clone(), &deadline, d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
-        if new_score == -32768 {
-            // out of time
-            callback(65535, convert_score(score), &pv, &count);
+        let asp_alpha = score - 50;
+        let asp_beta = score + 50;
+        let (asp_score, asp_pv) = alphabeta(position.clone(), history.clone(), &deadline, d, asp_alpha, asp_beta, &mut count, tt);
+        if asp_score == -32768 {
+            callback(65534, convert_score(score), &pv, &count);
             break;
         }
+        let (new_score, new_pv) = if asp_score > asp_alpha && asp_score < asp_beta {
+            (asp_score, asp_pv)
+        } else {
+            let alpha = if asp_score <= asp_alpha { i16::MIN + 1 } else { asp_alpha };
+            let beta = if asp_score >= asp_beta { i16::MAX - 1 } else { asp_beta };
+            let (sc, pv) = alphabeta(position.clone(), history.clone(), &deadline, d, alpha, beta, &mut count, tt);
+            if sc == -32768 {
+                // out of time
+                callback(65535, convert_score(score), &pv, &count);
+                break;
+            }
+            (sc, pv)
+        };
         score = new_score;
         pv = new_pv;
         callback(d, convert_score(score), &pv, &count);
