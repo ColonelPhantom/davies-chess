@@ -53,8 +53,8 @@ impl Deadline {
             TimeControl::FixedDepth(d) => Deadline::Depth(*d),
             TimeControl::FixedNodes(n) => Deadline::Nodes(*n),
             TimeControl::FixedTime(t) => {
-                let soft = start + std::time::Duration::from_millis(*t as u64 - 100);
-                let hard = start + std::time::Duration::from_millis(*t as u64 - 25);
+                let soft = start + std::time::Duration::from_millis((*t as u64).max(100) - 100);
+                let hard = start + std::time::Duration::from_millis((*t as u64).max(25) - 25);
                 Deadline::Time(soft, hard)
             },
             TimeControl::Infinite => Deadline::None,
@@ -76,9 +76,9 @@ impl Deadline {
             Deadline::None => false,
         }
     }
-    pub fn check_hard(&self, now: Instant, nodes_searched: usize, depth_searched: usize) -> bool {
+    pub fn check_hard(&self, now: Instant, nodes_searched: usize) -> bool {
         match self {
-            Deadline::Depth(d) => depth_searched >= *d,
+            Deadline::Depth(_) => false, // depth limit is a soft deadline
             Deadline::Nodes(n) => nodes_searched >= *n,
             Deadline::Time(_, hard) => now >= *hard,
             Deadline::None => false,

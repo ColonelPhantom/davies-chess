@@ -177,7 +177,7 @@ fn alphabeta(
         return (qsearch(position, alpha, beta, count, tt), Vec::new());
     }
 
-    if depth >= 4 && deadline.check_hard(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize, depth as usize) {
+    if depth >= 4 && deadline.check_hard(Instant::now(), (count.nodes + count.qnodes - count.leaves) as usize) {
         // out of time
         return (-32768, Vec::new());
     }
@@ -318,6 +318,7 @@ pub fn search(
         let (new_score, new_pv) = alphabeta(position.clone(), history.clone(), &deadline, d, i16::MIN + 1, i16::MAX - 1, &mut count, tt);
         if new_score == -32768 {
             // out of time
+            callback(65535, convert_score(score), &pv, &count);
             break;
         }
         score = new_score;
