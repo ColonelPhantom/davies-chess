@@ -26,6 +26,7 @@ impl NodeCount {
     }
 }
 
+// Move ordering
 // note: somewhat confusing, but for the inner values, lower is better
 // this is related to how sorting works (lower values earlier)
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -80,12 +81,15 @@ enum ScoreType {
     UpperBound = 2,
 }
 
-struct SearchState {
-    tt: Vec<AtomicU64>,
-    nodes: NodeCount,
-    deadline: time::Deadline,
-    stop: AtomicBool,
-}
+// Transposition table
+// TT-Entry bitmap:
+// 24 bits: high part of zobrist key (useful up to 2^40 entries, after that some bits become redundant with index; maybe use buckets at some point?)
+// 8 bits: search depth
+// 16 bits: score
+// 6 bits: from square
+// 6 bits: to square
+// 2 bits: score type
+// 2 bits: free!
 
 #[derive(Clone, Copy)]
 struct TTEntry {
@@ -98,15 +102,6 @@ struct TTEntry {
     depth: u8,
     score_type: ScoreType,
 }
-
-// TT-Entry bitmap:
-// 24 bits: high part of zobrist key (useful up to 2^40 entries, after that some bits become redundant with index; maybe use buckets at some point?)
-// 8 bits: search depth
-// 16 bits: score
-// 6 bits: from square
-// 6 bits: to square
-// 2 bits: score type
-// 2 bits: free!
 
 fn get_tt(tt: &Vec<AtomicU64>, moves: &[Move], key: u64) -> Option<TTEntry> {
     let index = (key % tt.len() as u64) as usize;
@@ -138,6 +133,14 @@ fn write_tt(tt: &Vec<AtomicU64>, key: u64, data: TTEntry) {
         | ((data.to as u64) << 4)
         | ((data.score_type as u64) << 2);
     tt[index].store(entry, std::sync::atomic::Ordering::Relaxed);
+}
+
+// Actual search implementation
+struct SearchState {
+    tt: Vec<AtomicU64>,
+    nodes: NodeCount,
+    deadline: time::Deadline,
+    stop: AtomicBool,
 }
 
 fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &SearchState) -> i16 {
