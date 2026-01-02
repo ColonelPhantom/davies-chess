@@ -1,4 +1,4 @@
-use std::{cmp::min, sync::atomic::AtomicU64, time::Instant};
+use std::{cmp::min, sync::atomic::{AtomicBool, AtomicU64}, time::Instant};
 
 use crate::{eval::{eval, eval_piece}, time, util::sort::LazySort};
 use shakmaty::{Chess, Move, Position, zobrist::{Zobrist64, ZobristHash}};
@@ -18,19 +18,20 @@ enum MoveOrderKey {
     Quiet(i16),        // development value
 }
 
+fn move_match_tt(m: &Move, tte: &TTEntry) -> bool {
+    (m.from().unwrap() as u8 == tte.from) && (m.to() as u8 == tte.to)
+}
+
 fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move) -> MoveOrderKey {
     // TT-move first 
-    if let Some(tte) = tte {
-        let is_tt: bool = (m.from().unwrap() as u8 == tte.from) && (m.to() as u8 == tte.to);
-        if is_tt {
-            return MoveOrderKey::TTMove(match m.promotion() {
-                Some(shakmaty::Role::Queen) => -4,
-                Some(shakmaty::Role::Rook) => -3,
-                Some(shakmaty::Role::Bishop) => -2,
-                Some(shakmaty::Role::Knight) => -1,
-                _ => 0,
-            });
-        }
+    if let Some(tte) = tte && move_match_tt(m, &tte) {
+        return MoveOrderKey::TTMove(match m.promotion() {
+            Some(shakmaty::Role::Queen) => -4,
+            Some(shakmaty::Role::Rook) => -3,
+            Some(shakmaty::Role::Bishop) => -2,
+            Some(shakmaty::Role::Knight) => -1,
+            _ => 0,
+        });
     }
 
     if let Some(captured) = m.capture() {
@@ -54,6 +55,16 @@ enum ScoreType {
     Exact = 0,
     LowerBound = 1,
     UpperBound = 2,
+}
+
+struct SearchState {
+    tt: Vec<AtomicU64>,
+    nodes: NodeCount,
+    stop: AtomicBool,
+}
+
+struct ThreadState {
+
 }
 
 #[derive(Clone, Copy)]
@@ -194,8 +205,19 @@ fn alphabeta(
         }
     });
 
+    let moves = position.legal_moves();
+    if moves.is_empty() {
+        if position.is_check() {
+            return (-32700, Vec::new());
+        } else {
+            return (0, Vec::new());
+        }
+    }
+
+
     // note: we should always have a tt_entry! IID makes sure we have one
-    if let Some(tte) = tt_entry {
+    // to make sure it is valid by more than the key, we check if the stored move is legal here
+    if let Some(tte) = tt_entry && moves.iter().any(|m| move_match_tt(m, &tte)) {
         if tte.depth as isize >= depth {
             // We can use the TT score, depending on if it's compatible with our alpha/beta window
             // TODO: fix pv handling for tt-cutoffs
@@ -228,15 +250,6 @@ fn alphabeta(
     }
     history.push(position.clone());
 
-
-    let moves = position.legal_moves();
-    if moves.is_empty() {
-        if position.is_check() {
-            return (-32700, Vec::new());
-        } else {
-            return (0, Vec::new());
-        }
-    }
 
     let mut pv = Vec::new();
     let mut best_value = i16::MIN;
