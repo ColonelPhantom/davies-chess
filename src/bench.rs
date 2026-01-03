@@ -36,7 +36,7 @@ pub fn bench() {
             count.qnodes.load(std::sync::atomic::Ordering::Relaxed),
             count.count(),
         );
-        println!("Principal Variation:");
+        print!("PV:");
         for mv in pv.iter().rev() {
             print!("{} ", mv);
         }
