@@ -159,6 +159,12 @@ fn alphabeta(
         }
     }
 
+    let mut child_depth = depth - 1;
+    if position.is_check() {
+        // extend search when in check
+        child_depth += 1;
+    }
+
     // Fetch TT entry, do IID if there is none
     let zob: Zobrist64 = position.zobrist_hash(shakmaty::EnPassantMode::Legal);
     let tt_entry = g.tt.get(&moves, zob.0).or_else(|| {
@@ -226,11 +232,11 @@ fn alphabeta(
         let (mut score, mut sub_pv);
         // TODO: what if we don't expect to find a raising move?
         if node_type == NodeType::All {
-            (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, g);
+            (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g);
         } else {
-            (score, sub_pv) = alphabeta(pos.clone(), hist.clone(), depth - 1, -alpha - 1, -alpha, g);
+            (score, sub_pv) = alphabeta(pos.clone(), hist.clone(), child_depth, -alpha - 1, -alpha, g);
             if -score > alpha && beta - alpha > 1 {
-                (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, g);
+                (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g);
             }
         }
         if score == -32768 {
