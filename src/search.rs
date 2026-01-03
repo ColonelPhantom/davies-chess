@@ -40,7 +40,7 @@ enum MoveOrderKey {
     Quiet(i16),        // development value
 }
 
-fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move) -> MoveOrderKey {
+fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, t: &ThreadState) -> MoveOrderKey {
     // TT-move first
     if let Some(tte) = tte
         && move_match_tt(m, &tte)
@@ -70,7 +70,10 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move) -> MoveOrderKey {
         let value_old = eval_piece(m.from().unwrap(), pos.turn(), role);
         let value_new = eval_piece(m.to(), pos.turn(), role_to);
         let devel = value_new - value_old;
-        MoveOrderKey::Quiet(-devel)
+
+        let hist = t.butterfly[pos.turn() as usize][m.from().unwrap() as usize][m.to() as usize];
+        MoveOrderKey::Quiet(-hist as i16)
+        // MoveOrderKey::Quiet(-(devel + hist))
     }
 }
 
@@ -82,7 +85,11 @@ struct SearchState {
     stop: AtomicBool,
 }
 
-fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &SearchState) -> i16 {
+struct ThreadState {
+    butterfly: [[[i32; 64]; 64]; 2],
+}
+
+fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &SearchState, t: &mut ThreadState) -> i16 {
     global.nodes.qnodes.fetch_add(1, Relaxed);
 
     let (moves, mut best) = if !position.is_check() {
@@ -100,11 +107,11 @@ fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &Search
         (position.legal_moves(), -32700)
     };
 
-    let moves = LazySort::new(&moves, |m| move_key(&position, None, m));
+    let moves = LazySort::new(&moves, |m| move_key(&position, None, m, t));
     for mv in moves {
         let mut pos = position.clone();
         pos.play_unchecked(&mv);
-        let score = -qsearch(pos, -beta, -alpha, global);
+        let score = -qsearch(pos, -beta, -alpha, global, t);
         if score >= beta {
             return score;
         }
@@ -132,13 +139,14 @@ fn alphabeta(
     mut alpha: i16,
     beta: i16,
     g: &SearchState,
+    t: &mut ThreadState,
 ) -> (i16, Vec<Move>) {
     g.nodes.nodes.fetch_add(1, Relaxed);
 
     // Check if we are done; go to qsearch if so
     if depth <= 0 {
         g.nodes.leaves.fetch_add(1, Relaxed);
-        return (qsearch(position, alpha, beta, g), Vec::new());
+        return (qsearch(position, alpha, beta, g, t), Vec::new());
     }
 
     // Check if we are out of time
@@ -177,6 +185,7 @@ fn alphabeta(
                 alpha,
                 beta,
                 g,
+                t,
             );
             g.tt.get(&moves, zob.0)
         } else {
@@ -223,8 +232,8 @@ fn alphabeta(
     let mut best_value = i16::MIN;
     let mut best_move = moves[0].clone();
     let mut node_type = NodeType::All;
-    let moves = LazySort::new(&moves, |m| move_key(&position, tt_entry, m));
-    for mv in moves {
+    let mut moves = LazySort::new(&moves, |m| move_key(&position, tt_entry, m, t));
+    while let Some(mv) = moves.next() {
         let mut pos = position.clone();
         pos.play_unchecked(mv);
         let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
@@ -232,11 +241,11 @@ fn alphabeta(
         let (mut score, mut sub_pv);
         // TODO: what if we don't expect to find a raising move?
         if node_type == NodeType::All {
-            (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g);
+            (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g, t);
         } else {
-            (score, sub_pv) = alphabeta(pos.clone(), hist.clone(), child_depth, -alpha - 1, -alpha, g);
+            (score, sub_pv) = alphabeta(pos.clone(), hist.clone(), child_depth, -alpha - 1, -alpha, g, t);
             if -score > alpha && beta - alpha > 1 {
-                (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g);
+                (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g, t);
             }
         }
         if score == -32768 {
@@ -256,6 +265,23 @@ fn alphabeta(
             if score >= beta {
                 // fail-soft
                 node_type = NodeType::Cut;
+
+                // Update butterfly table
+                if !mv.is_capture() {
+                    const MAX_HISTORY: i32 = 16384;
+                    let bonus = (depth as i32 * depth as i32).clamp(-MAX_HISTORY, MAX_HISTORY) as i32;
+                    let col = position.turn() as usize;
+                    let from = mv.from().unwrap() as usize;
+                    let to = mv.to() as usize;
+                    t.butterfly[col][from][to] += bonus - (t.butterfly[col][from][to] * bonus.abs()) / (MAX_HISTORY);
+
+                    for fail in moves.seen().filter(|m| !m.is_capture()) {
+                        let from = fail.from().unwrap() as usize;
+                        let to = fail.to() as usize;
+                        t.butterfly[col][from][to] -= bonus - (t.butterfly[col][from][to] * bonus.abs()) / (MAX_HISTORY);
+                    }
+                }
+
                 break;
             }
         }
@@ -313,6 +339,9 @@ pub fn search(
         deadline,
         stop: AtomicBool::new(false),
     };
+    let mut local = ThreadState {
+        butterfly: [[[0; 64]; 64]; 2],
+    };
     for d in 0.. {
         let asp_alpha = score - 50;
         let asp_beta = score + 50;
@@ -323,6 +352,7 @@ pub fn search(
             asp_alpha,
             asp_beta,
             &global,
+            &mut local,
         );
         if asp_score == -32768 {
             // out of time
@@ -337,7 +367,7 @@ pub fn search(
             let alpha = if asp_score <= asp_alpha { i16::MIN + 1 } else { asp_alpha };
             #[rustfmt::skip]
             let beta = if asp_score >= asp_beta { i16::MAX - 1 } else { asp_beta };
-            let (sc, pv) = alphabeta(position.clone(), history.clone(), d, alpha, beta, &global);
+            let (sc, pv) = alphabeta(position.clone(), history.clone(), d, alpha, beta, &global, &mut local);
             if sc == -32768 {
                 // out of time
                 callback(65535, convert_score(score), &pv, &global.nodes);

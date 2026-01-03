@@ -13,6 +13,10 @@ impl <'a, T, C: Ord> LazySort<'a, T, C> {
         let seen = vec![false; data.len()];
         Self { data, keys, seen }
     }
+
+    pub fn seen(&self) -> impl Iterator<Item=&'a T> {
+        self.data.iter().zip(self.seen.iter()).filter_map(|(item, &s)| if s { Some(item) } else { None })
+    }
 }
 
 impl<'a, T, C> Iterator for LazySort<'a, T, C> where C: PartialOrd {
