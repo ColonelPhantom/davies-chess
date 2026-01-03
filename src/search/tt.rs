@@ -37,34 +37,45 @@ pub struct TTEntry {
     pub score_type: ScoreType,
 }
 
-pub fn get_tt(tt: &Vec<AtomicU64>, moves: &[Move], key: u64) -> Option<TTEntry> {
-    let index = (key % tt.len() as u64) as usize;
-    let entry = tt[index].load(std::sync::atomic::Ordering::Relaxed);
-    if entry >> 40 == (key >> 40) {
-        let depth = ((entry >> 32) & 0xFF) as u8;
-        let value = ((entry >> 16) & 0xFFFF) as i16;
-        let from = ((entry >> 10) & 0x3F) as u8;
-        let to = ((entry >> 4) & 0x3F) as u8;
-        let score_type = match (entry >> 2) & 0x3 {
-            0 => ScoreType::Exact,
-            1 => ScoreType::LowerBound,
-            2 => ScoreType::UpperBound,
-            _ => unreachable!(),
-        };
-        let entry = TTEntry { from, to, value, depth, score_type };
-        if moves.iter().any(|m| move_match_tt(m, &entry)) { Some(entry) } else { None }
-    } else {
-        None
-    }
-}
+pub struct TT(Vec<AtomicU64>);
 
-pub fn write_tt(tt: &Vec<AtomicU64>, key: u64, data: TTEntry) {
-    let index = (key % tt.len() as u64) as usize;
-    let entry = (key & 0xFFFFFF0000000000) // basically << 40 but keeping the high part
-        | ((data.depth as u64) << 32)
-        | ((data.value.cast_unsigned() as u64) << 16)
-        | ((data.from as u64) << 10)
-        | ((data.to as u64) << 4)
-        | ((data.score_type as u64) << 2);
-    tt[index].store(entry, std::sync::atomic::Ordering::Relaxed);
+impl TT {
+    pub fn new(size: usize) -> Self {
+        let mut v = Vec::new();
+        v.resize_with(size, || AtomicU64::new(0));
+        TT(v)
+    }
+
+    pub fn get(&self, moves: &[Move], key: u64) -> Option<TTEntry> {
+        let index = (key % self.0.len() as u64) as usize;
+        let entry = self.0[index].load(std::sync::atomic::Ordering::Relaxed);
+        if entry >> 40 == (key >> 40) {
+            let depth = ((entry >> 32) & 0xFF) as u8;
+            let value = ((entry >> 16) & 0xFFFF) as i16;
+            let from = ((entry >> 10) & 0x3F) as u8;
+            let to = ((entry >> 4) & 0x3F) as u8;
+            let score_type = match (entry >> 2) & 0x3 {
+                0 => ScoreType::Exact,
+                1 => ScoreType::LowerBound,
+                2 => ScoreType::UpperBound,
+                _ => unreachable!(),
+            };
+            let entry = TTEntry { from, to, value, depth, score_type };
+            if moves.iter().any(|m| move_match_tt(m, &entry)) { Some(entry) } else { None }
+        } else {
+            None
+        }
+    }
+
+    pub fn write(&self, key: u64, data: TTEntry) {
+        let index = (key % self.0.len() as u64) as usize;
+        let entry = (key & 0xFFFFFF0000000000) // basically << 40 but keeping the high part
+            | ((data.depth as u64) << 32)
+            | ((data.value.cast_unsigned() as u64) << 16)
+            | ((data.from as u64) << 10)
+            | ((data.to as u64) << 4)
+            | ((data.score_type as u64) << 2);
+        self.0[index].store(entry, std::sync::atomic::Ordering::Relaxed);
+    }
+
 }

@@ -14,7 +14,7 @@ use shakmaty::{
     zobrist::{Zobrist64, ZobristHash},
 };
 
-mod tt;
+pub mod tt;
 
 use tt::*;
 
@@ -76,7 +76,7 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move) -> MoveOrderKey {
 
 // Actual search implementation
 struct SearchState {
-    tt: Vec<AtomicU64>,
+    tt: TT,
     nodes: NodeCount,
     deadline: time::Deadline,
     stop: AtomicBool,
@@ -161,7 +161,7 @@ fn alphabeta(
 
     // Fetch TT entry, do IID if there is none
     let zob: Zobrist64 = position.zobrist_hash(shakmaty::EnPassantMode::Legal);
-    let tt_entry = get_tt(&g.tt, &moves, zob.0).or_else(|| {
+    let tt_entry = g.tt.get(&moves, zob.0).or_else(|| {
         if depth >= 3 {
             let depth_internal = min(depth - 2, 2);
             alphabeta(
@@ -172,7 +172,7 @@ fn alphabeta(
                 beta,
                 g,
             );
-            get_tt(&g.tt, &moves, zob.0)
+            g.tt.get(&moves, zob.0)
         } else {
             None
         }
@@ -255,8 +255,7 @@ fn alphabeta(
         }
     }
 
-    write_tt(
-        &g.tt,
+    g.tt.write(
         zob.0,
         TTEntry {
             from: best_move.from().unwrap() as u8,
@@ -293,7 +292,7 @@ pub fn search(
     position: shakmaty::Chess,
     history: Vec<shakmaty::Chess>,
     deadline: time::Deadline,
-    tt: Vec<AtomicU64>,
+    tt: TT,
     callback: &mut dyn FnMut(isize, ruci::Score, &Vec<Move>, &NodeCount),
 ) -> (ruci::Score, Vec<Move>, NodeCount) {
     let mut score = eval(&position);

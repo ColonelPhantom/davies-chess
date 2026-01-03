@@ -1,5 +1,3 @@
-use std::sync::atomic::AtomicU64;
-
 use shakmaty::Chess;
 
 use crate::{search::search, time};
@@ -17,8 +15,7 @@ pub fn bench() {
             .clone()
             .into_position(shakmaty::CastlingMode::Standard)
             .unwrap();
-        let mut tt = Vec::new();
-        tt.resize_with(1 << 24, || AtomicU64::new(0));
+        let tt = crate::search::tt::TT::new(1 << 20);
         let (score, pv, count) = search(
             position,
             Vec::new(),

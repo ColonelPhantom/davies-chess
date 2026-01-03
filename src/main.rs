@@ -22,7 +22,6 @@ use shakmaty::{CastlingMode, Chess, Position};
 use std::borrow::Cow;
 use std::io::{self, stdin, stdout};
 use std::io::{BufRead, Write};
-use std::sync::atomic::AtomicU64;
 
 mod bench;
 mod search;
@@ -110,7 +109,7 @@ where
                 };
 
                 let starttime = std::time::Instant::now();
-                let mut tt = Vec::new(); tt.resize_with(1 << 20, || AtomicU64::new(0));
+                let tt = search::tt::TT::new(1 << 20);
                 let (_score, mut pv, _count) = search::search(
                     state.position.clone(), 
                     state.history.clone(),
