@@ -74,7 +74,7 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move) -> MoveOrderKey {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum ScoreType {
     Exact = 0,
     LowerBound = 1,
@@ -179,6 +179,7 @@ fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &Search
     return best;
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum NodeType {
     PV,
     Cut,
@@ -282,7 +283,17 @@ fn alphabeta(
         let mut pos = position.clone();
         pos.play_unchecked(mv);
         let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
-        let (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, g);
+
+        let (mut score, mut sub_pv);
+        // TODO: what if we don't expect to find a raising move?
+        if node_type == NodeType::All {
+            (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, g);
+        } else {
+            (score, sub_pv) = alphabeta(pos.clone(), hist.clone(), depth - 1, -alpha - 1, -alpha, g);
+            if -score > alpha && beta - alpha > 1 {
+                (score, sub_pv) = alphabeta(pos, hist, depth - 1, -beta, -alpha, g);
+            }
+        }
         if score == -32768 {
             // out of time
             return (-32768, Vec::new());
