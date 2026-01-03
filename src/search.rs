@@ -72,7 +72,7 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, t: &ThreadState) -> Mov
         let devel = value_new - value_old;
 
         let hist = t.butterfly[pos.turn() as usize][m.from().unwrap() as usize][m.to() as usize];
-        MoveOrderKey::Quiet(-hist as i16)
+        MoveOrderKey::Quiet(-(devel + hist / 16))
         // MoveOrderKey::Quiet(-(devel + hist))
     }
 }
@@ -86,7 +86,7 @@ struct SearchState {
 }
 
 struct ThreadState {
-    butterfly: [[[i32; 64]; 64]; 2],
+    butterfly: [[[i16; 64]; 64]; 2],
 }
 
 fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &SearchState, t: &mut ThreadState) -> i16 {
@@ -273,12 +273,12 @@ fn alphabeta(
                     let col = position.turn() as usize;
                     let from = mv.from().unwrap() as usize;
                     let to = mv.to() as usize;
-                    t.butterfly[col][from][to] += bonus - (t.butterfly[col][from][to] * bonus.abs()) / (MAX_HISTORY);
+                    t.butterfly[col][from][to] += (bonus - (t.butterfly[col][from][to] as i32 * bonus.abs()) / (MAX_HISTORY)) as i16;
 
                     for fail in moves.seen().filter(|m| !m.is_capture()) {
                         let from = fail.from().unwrap() as usize;
                         let to = fail.to() as usize;
-                        t.butterfly[col][from][to] -= bonus - (t.butterfly[col][from][to] * bonus.abs()) / (MAX_HISTORY);
+                        t.butterfly[col][from][to] -= (bonus - (t.butterfly[col][from][to] as i32 * bonus.abs()) / (MAX_HISTORY)) as i16;
                     }
                 }
 
