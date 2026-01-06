@@ -19,8 +19,8 @@ impl <'a, T, C: Ord> LazySort<'a, T, C> {
     }
 }
 
-impl<'a, T, C> Iterator for LazySort<'a, T, C> where C: PartialOrd {
-    type Item = &'a T;
+impl<'a, T, C> Iterator for LazySort<'a, T, C> where C: PartialOrd + Copy {
+    type Item = (C, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut best: Option<usize> = None;
@@ -38,7 +38,7 @@ impl<'a, T, C> Iterator for LazySort<'a, T, C> where C: PartialOrd {
         }
         if let Some(best_idx) = best {
             self.seen[best_idx] = true;
-            Some(&self.data[best_idx])
+            Some((self.keys[best_idx], &self.data[best_idx]))
         } else {
             None
             

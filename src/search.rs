@@ -108,7 +108,7 @@ fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &Search
     };
 
     let moves = LazySort::new(&moves, |m| move_key(&position, None, m, t));
-    for mv in moves {
+    for (_key ,mv) in moves {
         let mut pos = position.clone();
         pos.play_unchecked(&mv);
         let score = -qsearch(pos, -beta, -alpha, global, t);
@@ -233,19 +233,25 @@ fn alphabeta(
     let mut best_move = moves[0].clone();
     let mut node_type = NodeType::All;
     let mut moves = LazySort::new(&moves, |m| move_key(&position, tt_entry, m, t));
-    while let Some(mv) = moves.next() {
+    while let Some((key, mv)) = moves.next() {
         let mut pos = position.clone();
         pos.play_unchecked(mv);
         let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
 
+        let this_depth = if let MoveOrderKey::Quiet(penalty) = key && depth > 3 && penalty > 0 {
+            child_depth - 1
+            // child_depth - (penalty as isize / 128).clamp(1, child_depth - 2)
+        } else {
+            child_depth
+        };
         let (mut score, mut sub_pv);
         // TODO: what if we don't expect to find a raising move?
         if node_type == NodeType::All {
-            (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g, t);
+            (score, sub_pv) = alphabeta(pos, hist, this_depth, -beta, -alpha, g, t);
         } else {
-            (score, sub_pv) = alphabeta(pos.clone(), hist.clone(), child_depth, -alpha - 1, -alpha, g, t);
+            (score, sub_pv) = alphabeta(pos.clone(), hist.clone(), this_depth, -alpha - 1, -alpha, g, t);
             if -score > alpha && beta - alpha > 1 {
-                (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g, t);
+                (score, sub_pv) = alphabeta(pos, hist, this_depth, -beta, -alpha, g, t);
             }
         }
         if score == -32768 {
