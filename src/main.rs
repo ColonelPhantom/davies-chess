@@ -16,12 +16,13 @@
 //! - [`Quit`](ruci::Quit)
 
 use ruci::gui::Message;
-use ruci::{BestMove, Depth, Gui, Id, Info, NormalBestMove, UciOk, ReadyOk};
+use ruci::{BestMove, Depth, Gui, Id, Info, NormalBestMove, Option, ReadyOk, UciOk};
 use shakmaty::uci::{IllegalUciMoveError, UciMove};
 use shakmaty::{CastlingMode, Chess, Position};
 use std::borrow::Cow;
 use std::io::{self, stdin, stdout};
 use std::io::{BufRead, Write};
+use std::sync::RwLock;
 
 mod bench;
 mod search;
@@ -33,9 +34,27 @@ mod util;
 struct State {
     position: Chess,
     history: Vec<Chess>,
+    tt: RwLock<search::tt::TT>,
+    config: Configuration,
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+struct Configuration {
+    hash_size_mb: usize,
+    threads: usize,
+}
+// struct Option {
+//     name: &'static str,
+//     typ: OptionType,
+// }
+// enum OptionType {
+//     Check,
+//     Spin(isize, isize),
+//     Combo(Vec<&'static str>),
+//     String(String),
+//     Button,
+// }
 
 /// Starts a new engine that forever reads messages, unless told to quit.
 pub fn engine<E, G>(engine: E, gui: G) -> io::Result<()>
@@ -47,6 +66,8 @@ where
     let mut state = State {
         position: Chess::new(),
         history: Vec::new(),
+        tt: RwLock::new(search::tt::TT::new(1 << 20)),
+        config: Configuration { hash_size_mb: 8, threads: 1 },
     };
 
     gui.send_string("engine started")?;
@@ -63,6 +84,27 @@ where
         };
 
         match message {
+            Message::SetOption(opt) => match opt.name.as_ref() {
+                "Hash" => {
+                    let hash_size_mb: usize = opt.value.and_then(|s| s.parse().ok()).unwrap();
+                    let tt = search::tt::TT::new((hash_size_mb * 1024 * 1024) / 8);
+                    {
+                        let mut tt_lock = state.tt.write().unwrap();
+                        *tt_lock = tt;
+                    }
+                }
+                "Threads" => {
+                    let num_threads: usize = opt.value.and_then(|s| s.parse().ok()).unwrap();
+                    if num_threads != 1 {
+                        gui.send_string("only 1 thread supported")?;
+                    } else {
+                        state.config.threads = num_threads;
+                    }
+                }
+                _ => {
+                    gui.send_string(&format!("unknown option: {}", opt.name))?;
+                }
+            },
             Message::Quit(_) => return Ok(()),
             Message::Position(position) => {
                 let (position, moves) = match position {
@@ -78,14 +120,18 @@ where
                     }
                 };
 
-                match moves.iter().try_fold((position, Vec::new()), |(mut position, mut history), r#move| {
-                    history.push(position.clone());
-                    let r#move = r#move.to_move(&position)?;
-                    position.play_unchecked(&r#move);
-                    Ok::<_, IllegalUciMoveError>((position, history))
-                }) {
+                match moves.iter().try_fold(
+                    (position, Vec::new()),
+                    |(mut position, mut history), r#move| {
+                        history.push(position.clone());
+                        let r#move = r#move.to_move(&position)?;
+                        position.play_unchecked(&r#move);
+                        Ok::<_, IllegalUciMoveError>((position, history))
+                    },
+                ) {
                     Ok((position, history)) => {
-                        state = State { position, history };
+                        state.position = position;
+                        state.history = history;
                         gui.send_string("position set")?;
                     }
                     Err(e) => {
@@ -95,10 +141,8 @@ where
             }
             Message::Go(go) => {
                 if state.position.legal_moves().first().is_none() {
-                    let null = BestMove::Normal(NormalBestMove {
-                        r#move: UciMove::Null,
-                        ponder: None,
-                    });
+                    let null =
+                        BestMove::Normal(NormalBestMove { r#move: UciMove::Null, ponder: None });
                     gui.send(null)?;
                 }
 
@@ -111,7 +155,7 @@ where
                 let starttime = std::time::Instant::now();
                 let tt = search::tt::TT::new(1 << 20);
                 let (_score, mut pv, _count) = search::search(
-                    state.position.clone(), 
+                    state.position.clone(),
                     state.history.clone(),
                     deadline,
                     tt,
@@ -120,22 +164,21 @@ where
                         let nodes = count.count();
                         let nps = nodes * 1000 / elapsed.max(1);
                         let info = Info {
-                            depth: Some(Depth {
-                                depth: depth as usize,
-                                seldepth: None,
-                            }),
-                            pv: Cow::Owned(pv.iter().rev().map(|m| m.to_uci(CastlingMode::Standard)).collect()),
-                            score: Some(ruci::ScoreWithBound {
-                                kind: score,
-                                bound: None,
-                            }),
+                            depth: Some(Depth { depth: depth as usize, seldepth: None }),
+                            pv: Cow::Owned(
+                                pv.iter()
+                                    .rev()
+                                    .map(|m| m.to_uci(CastlingMode::Standard))
+                                    .collect(),
+                            ),
+                            score: Some(ruci::ScoreWithBound { kind: score, bound: None }),
                             nodes: Some(nodes as usize),
                             nps: Some(nps as usize),
                             time: Some(elapsed as usize),
                             ..Default::default()
                         };
                         gui.send(info).unwrap();
-                    }
+                    },
                 );
                 pv.reverse();
                 let bestmove = pv.first().cloned();
@@ -146,20 +189,31 @@ where
                     });
                     gui.send(best_move)?;
                 } else {
-                    let null = BestMove::Normal(NormalBestMove {
-                        r#move: UciMove::Null,
-                        ponder: None,
-                    });
+                    let null =
+                        BestMove::Normal(NormalBestMove { r#move: UciMove::Null, ponder: None });
                     gui.send(null)?;
                 }
             }
             Message::Uci(_) => {
                 let name = format!("Davies {}", VERSION);
-                let id_name = Id::Name (Cow::Borrowed(&name));
+                let id_name = Id::Name(Cow::Borrowed(&name));
                 let id_author = Id::Author(Cow::Borrowed("Quinten Kock"));
 
                 gui.send(id_name)?;
                 gui.send(id_author)?;
+
+                gui.send(Option {
+                    name: std::borrow::Cow::Borrowed("Hash"),
+                    r#type: ruci::OptionType::Spin {
+                        default: Some(8),
+                        min: Some(1),
+                        max: Some(33_554_432),
+                    },
+                })?;
+                gui.send(Option {
+                    name: std::borrow::Cow::Borrowed("Threads"),
+                    r#type: ruci::OptionType::Spin { default: Some(1), min: Some(1), max: Some(1) },
+                })?;
                 gui.send(UciOk)?;
             }
             Message::IsReady(_) => {
