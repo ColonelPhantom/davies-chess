@@ -9,6 +9,7 @@ use crate::{
     time,
     util::sort::LazySort,
 };
+use arrayvec::ArrayVec;
 use shakmaty::{
     Chess, Move, Position,
     zobrist::{Zobrist64, ZobristHash},
@@ -78,8 +79,8 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, t: &ThreadState) -> Mov
 }
 
 // Actual search implementation
-struct SearchState {
-    tt: TT,
+struct SearchState<'a> {
+    tt: &'a TT,
     nodes: NodeCount,
     deadline: time::Deadline,
     stop: AtomicBool,
@@ -158,7 +159,7 @@ fn alphabeta(
     }
 
     // Generate moves; detect checkmate/stalemate
-    let moves = position.legal_moves();
+    let mut moves = position.legal_moves();
     if moves.is_empty() {
         if position.is_check() {
             return (-32700, Vec::new());
@@ -199,20 +200,30 @@ fn alphabeta(
     {
         // We can use the TT score, depending on if it's compatible with our alpha/beta window
         // TODO: fix pv handling for tt-cutoffs
-        match tte.score_type {
+        let cut = match tte.score_type {
             ScoreType::Exact => {
                 // TODO: this cuts off PV, and might be wrong?
-                return (tte.value, Vec::new());
+                true
             }
             ScoreType::LowerBound if tte.value >= beta => {
                 // We know that at least one move is better than beta; cut
-                return (tte.value, Vec::new());
+                true
             }
             ScoreType::UpperBound if tte.value < alpha => {
                 // We know that no moves will raise alpha; cut
-                return (tte.value, Vec::new());
+                true
             }
-            _ => {}
+            _ => false
+        };
+
+        if cut {
+            // return (tte.value, Vec::new());
+            let newmoves: ArrayVec<_, _> = moves.into_iter().filter(|m| move_match_tt(m, &tte)).collect();
+            if newmoves.len() == 1 {
+                return (tte.value, vec![newmoves[0].clone()]);
+            } else {
+                moves = newmoves;
+            }
         }
     }
 
@@ -330,7 +341,7 @@ pub fn search(
     position: shakmaty::Chess,
     history: Vec<shakmaty::Chess>,
     deadline: time::Deadline,
-    tt: TT,
+    tt: &TT,
     callback: &mut dyn FnMut(isize, ruci::Score, &Vec<Move>, &NodeCount),
 ) -> (ruci::Score, Vec<Move>, NodeCount) {
     let mut score = eval(&position);

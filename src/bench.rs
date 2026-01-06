@@ -23,7 +23,7 @@ pub fn bench() {
             position,
             Vec::new(),
             time::Deadline::Depth(depth as usize),
-            tt,
+            &tt,
             &mut |_, _, _, _| {},
         );
         println!("FEN: {}", fen);

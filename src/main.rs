@@ -41,7 +41,6 @@ struct State {
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct Configuration {
-    hash_size_mb: usize,
     threads: usize,
 }
 // struct Option {
@@ -67,7 +66,7 @@ where
         position: Chess::new(),
         history: Vec::new(),
         tt: RwLock::new(search::tt::TT::new(1 << 20)),
-        config: Configuration { hash_size_mb: 8, threads: 1 },
+        config: Configuration { threads: 1 },
     };
 
     gui.send_string("engine started")?;
@@ -153,12 +152,12 @@ where
                 };
 
                 let starttime = std::time::Instant::now();
-                let tt = search::tt::TT::new(1 << 20);
+                let tt = state.tt.read().unwrap();
                 let (_score, mut pv, _count) = search::search(
                     state.position.clone(),
                     state.history.clone(),
                     deadline,
-                    tt,
+                    &tt,
                     &mut |depth, score, pv, count| {
                         let elapsed = starttime.elapsed().as_millis() as u64;
                         let nodes = count.count();
