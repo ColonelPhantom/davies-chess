@@ -159,7 +159,7 @@ fn alphabeta(
     }
 
     // Generate moves; detect checkmate/stalemate
-    let mut moves = position.legal_moves();
+    let moves = position.legal_moves();
     if moves.is_empty() {
         if position.is_check() {
             return (-32700, Vec::new());
@@ -198,32 +198,15 @@ fn alphabeta(
     if let Some(tte) = tt_entry
         && tte.depth as isize >= depth
     {
-        // We can use the TT score, depending on if it's compatible with our alpha/beta window
-        // TODO: fix pv handling for tt-cutoffs
-        let cut = match tte.score_type {
-            ScoreType::Exact => {
-                // TODO: this cuts off PV, and might be wrong?
-                true
-            }
-            ScoreType::LowerBound if tte.value >= beta => {
-                // We know that at least one move is better than beta; cut
-                true
-            }
-            ScoreType::UpperBound if tte.value < alpha => {
-                // We know that no moves will raise alpha; cut
-                true
-            }
-            _ => false
-        };
+        // We can use the TT score for cutoffs, depending on if it's compatible with our alpha/beta window
+        // It is compatible if:
+        // - it is not an upper bound, and the score >= beta (so the real score also >= beta)
+        // - it is not a lower bound, and the score < alpha (so the real score also < alpha)
+        let cut = tte.score_type != ScoreType::UpperBound && tte.value >= beta
+            || tte.score_type != ScoreType::LowerBound && tte.value < alpha;
 
         if cut {
-            // return (tte.value, Vec::new());
-            let newmoves: ArrayVec<_, _> = moves.into_iter().filter(|m| move_match_tt(m, &tte)).collect();
-            if newmoves.len() == 1 {
-                return (tte.value, vec![newmoves[0].clone()]);
-            } else {
-                moves = newmoves;
-            }
+            return (tte.value, Vec::new());
         }
     }
 
@@ -255,9 +238,8 @@ fn alphabeta(
         } else {
             child_depth
         };
-        let (mut score, mut sub_pv);
         // TODO: what if we don't expect to find a raising move?
-        (score, sub_pv) = alphabeta(pos, hist, this_depth, -beta, -alpha, g, t);
+        let (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g, t);
         if score == -32768 {
             // out of time
             return (-32768, Vec::new());
@@ -353,38 +335,14 @@ pub fn search(
         butterfly: [[[0; 64]; 64]; 2],
     };
     for d in 0.. {
-        let asp_alpha = score - 50;
-        let asp_beta = score + 50;
-        let (asp_score, asp_pv) = alphabeta(
-            position.clone(),
-            history.clone(),
-            d,
-            asp_alpha,
-            asp_beta,
-            &global,
-            &mut local,
-        );
-        if asp_score == -32768 {
+        let alpha = i16::MIN + 1;
+        let beta = i16::MAX;
+        let (new_score, new_pv) = alphabeta(position.clone(), history.clone(), d, alpha, beta, &global, &mut local);
+        if new_score == -32768 {
             // out of time
-            callback(65534, convert_score(score), &pv, &global.nodes);
+            callback(65535, convert_score(score), &pv, &global.nodes);
             break;
         }
-        let (new_score, new_pv) = if asp_score > asp_alpha && asp_score < asp_beta {
-            (asp_score, asp_pv)
-        } else {
-            // TODO: what if search fails a second time?
-            #[rustfmt::skip]
-            let alpha = if asp_score <= asp_alpha { i16::MIN + 1 } else { asp_alpha };
-            #[rustfmt::skip]
-            let beta = if asp_score >= asp_beta { i16::MAX - 1 } else { asp_beta };
-            let (sc, pv) = alphabeta(position.clone(), history.clone(), d, alpha, beta, &global, &mut local);
-            if sc == -32768 {
-                // out of time
-                callback(65535, convert_score(score), &pv, &global.nodes);
-                break;
-            }
-            (sc, pv)
-        };
         score = new_score;
         pv = new_pv;
         callback(d, convert_score(score), &pv, &global.nodes);
