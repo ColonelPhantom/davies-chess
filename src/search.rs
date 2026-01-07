@@ -73,7 +73,8 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, t: &ThreadState) -> Mov
         let devel = value_new - value_old;
 
         let hist = t.butterfly[pos.turn() as usize][m.from().unwrap() as usize][m.to() as usize];
-        MoveOrderKey::Quiet(-(devel + hist / 16))
+        // MoveOrderKey::Quiet(-(devel + hist / 16))
+        MoveOrderKey::Quiet(-devel)
         // MoveOrderKey::Quiet(-(devel + hist))
     }
 }
