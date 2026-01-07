@@ -1,13 +1,10 @@
 use std::{
-    cmp::min,
     sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
     time::Instant,
 };
 
 use crate::{
-    eval::{eval, eval_piece},
-    time,
-    util::sort::LazySort,
+    Configuration, eval::{eval, eval_piece}, time, util::sort::LazySort
 };
 use arrayvec::ArrayVec;
 use shakmaty::{
@@ -88,6 +85,7 @@ struct SearchState<'a> {
 
 struct ThreadState {
     butterfly: [[[i16; 64]; 64]; 2],
+    ismain: bool,
 }
 
 fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &SearchState, t: &mut ThreadState) -> i16 {
@@ -177,21 +175,21 @@ fn alphabeta(
     // Fetch TT entry, do IID if there is none
     let zob: Zobrist64 = position.zobrist_hash(shakmaty::EnPassantMode::Legal);
     let tt_entry = g.tt.get(&moves, zob.0).or_else(|| {
-        if depth >= 3 {
-            let depth_internal = min(depth - 2, 2);
-            alphabeta(
-                position.clone(),
-                history.clone(),
-                depth_internal,
-                alpha,
-                beta,
-                g,
-                t,
-            );
-            g.tt.get(&moves, zob.0)
-        } else {
+        // if depth >= 3 {
+        //     let depth_internal = min(depth - 2, 2);
+        //     alphabeta(
+        //         position.clone(),
+        //         history.clone(),
+        //         depth_internal,
+        //         alpha,
+        //         beta,
+        //         g,
+        //         t,
+        //     );
+        //     g.tt.get(&moves, zob.0)
+        // } else {
             None
-        }
+        // }
     });
 
     // If we have a valid TT entry, with enough depth, we can potentially use its score (TT-cut)
@@ -317,6 +315,7 @@ fn alphabeta(
                 NodeType::All => ScoreType::UpperBound,
             },
         },
+        t.ismain,
     );
     if best_value < -32500 {
         best_value += 1;
@@ -342,6 +341,7 @@ pub fn search(
     history: Vec<shakmaty::Chess>,
     deadline: time::Deadline,
     tt: &TT,
+    config: &Configuration,
     callback: &mut dyn FnMut(isize, ruci::Score, &Vec<Move>, &NodeCount),
 ) -> (ruci::Score, Vec<Move>, NodeCount) {
     let mut score = eval(&position);
@@ -356,54 +356,108 @@ pub fn search(
         deadline,
         stop: AtomicBool::new(false),
     };
-    let mut local = ThreadState {
-        butterfly: [[[0; 64]; 64]; 2],
-    };
-    for d in 0.. {
-        let asp_alpha = score - 50;
-        let asp_beta = score + 50;
-        let (asp_score, asp_pv) = alphabeta(
-            position.clone(),
-            history.clone(),
-            d,
-            asp_alpha,
-            asp_beta,
-            &global,
-            &mut local,
-        );
-        if asp_score == -32768 {
-            // out of time
-            callback(65534, convert_score(score), &pv, &global.nodes);
-            break;
+
+    let (score, pv) = std::thread::scope(|s| {
+        let mut joins = Vec::new();
+        for i in 1..config.threads {
+            let thread_idx = i;
+            let position = &position;
+            let history = &history;
+            let global = &global;
+            let join = s.spawn(move || {
+                let inner = thread_idx;
+                let mut local = ThreadState {
+                    butterfly: [[[0; 64]; 64]; 2],
+                    ismain: false,
+                };
+                for j in 0.. {
+                    let (new_score, _pv) = alphabeta(
+                        position.clone(),
+                        history.clone(),
+                        thread_idx as isize * j,
+                        i16::MIN + 1,
+                        i16::MAX - 1,
+                        &global,
+                        &mut local,
+                    );
+                    if new_score == -32768 {
+                        // out of time
+                        break;
+                    }
+                    if global.deadline.check_soft(Instant::now(), global.nodes.count() as usize, 0) {
+                        break;
+                    }
+                    if global.deadline.check_hard(Instant::now(), global.nodes.count() as usize) {
+                        break;
+                    }
+                }
+            });
+            joins.push(join);
         }
-        let (new_score, new_pv) = if asp_score > asp_alpha && asp_score < asp_beta {
-            (asp_score, asp_pv)
-        } else {
-            // TODO: what if search fails a second time?
-            #[rustfmt::skip]
-            let alpha = if asp_score <= asp_alpha { i16::MIN + 1 } else { asp_alpha };
-            #[rustfmt::skip]
-            let beta = if asp_score >= asp_beta { i16::MAX - 1 } else { asp_beta };
-            let (sc, pv) = alphabeta(position.clone(), history.clone(), d, alpha, beta, &global, &mut local);
-            if sc == -32768 {
+
+        let mut local: ThreadState = ThreadState {
+            butterfly: [[[0; 64]; 64]; 2],
+            ismain: true,
+        };
+
+
+
+        for d in 0.. {
+            let asp_alpha = score - 50;
+            let asp_beta = score + 50;
+            let (asp_score, asp_pv) = alphabeta(
+                position.clone(),
+                history.clone(),
+                d,
+                asp_alpha,
+                asp_beta,
+                &global,
+                &mut local,
+            );
+            if asp_score == -32768 {
                 // out of time
-                callback(65535, convert_score(score), &pv, &global.nodes);
+                callback(65534, convert_score(score), &pv, &global.nodes);
                 break;
             }
-            (sc, pv)
-        };
-        score = new_score;
-        pv = new_pv;
-        callback(d, convert_score(score), &pv, &global.nodes);
-        if !pv.is_empty()
-            && global.deadline.check_soft(
-                Instant::now(),
-                (global.nodes.count()) as usize,
-                d as usize,
-            )
-        {
-            break;
+            let (new_score, new_pv) = if asp_score > asp_alpha && asp_score < asp_beta {
+                (asp_score, asp_pv)
+            } else {
+                // TODO: what if search fails a second time?
+                #[rustfmt::skip]
+                let alpha = if asp_score <= asp_alpha { i16::MIN + 1 } else { asp_alpha };
+                #[rustfmt::skip]
+                let beta = if asp_score >= asp_beta { i16::MAX - 1 } else { asp_beta };
+                let (sc, pv) = alphabeta(position.clone(), history.clone(), d, alpha, beta, &global, &mut local);
+                if sc == -32768 {
+                    // out of time
+                    callback(65535, convert_score(score), &pv, &global.nodes);
+                    break;
+                }
+                (sc, pv)
+            };
+            score = new_score;
+            pv = new_pv;
+            callback(d, convert_score(score), &pv, &global.nodes);
+            if !pv.is_empty()
+                && global.deadline.check_soft(
+                    Instant::now(),
+                    (global.nodes.count()) as usize,
+                    d as usize,
+                )
+            {
+                break;
+            }
         }
-    }
+        let mut tries = 0;
+        while joins.iter().any(|j| !j.is_finished()) {
+            global.stop.store(true, Relaxed);
+            std::thread::yield_now();
+            if tries > 1000 {
+                panic!("worker threads did not finish in time");
+            }
+        }
+        (score, pv)
+    });
+    global.stop.store(false, Relaxed);
     (convert_score(score), pv, global.nodes)
 }

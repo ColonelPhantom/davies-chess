@@ -94,11 +94,7 @@ where
                 }
                 "Threads" => {
                     let num_threads: usize = opt.value.and_then(|s| s.parse().ok()).unwrap();
-                    if num_threads != 1 {
-                        gui.send_string("only 1 thread supported")?;
-                    } else {
-                        state.config.threads = num_threads;
-                    }
+                    state.config.threads = num_threads;
                 }
                 _ => {
                     gui.send_string(&format!("unknown option: {}", opt.name))?;
@@ -158,6 +154,7 @@ where
                     state.history.clone(),
                     deadline,
                     &tt,
+                    &state.config,
                     &mut |depth, score, pv, count| {
                         let elapsed = starttime.elapsed().as_millis() as u64;
                         let nodes = count.count();
@@ -211,7 +208,7 @@ where
                 })?;
                 gui.send(Option {
                     name: std::borrow::Cow::Borrowed("Threads"),
-                    r#type: ruci::OptionType::Spin { default: Some(1), min: Some(1), max: Some(1) },
+                    r#type: ruci::OptionType::Spin { default: Some(1), min: Some(1), max: Some(1024) },
                 })?;
                 gui.send(UciOk)?;
             }

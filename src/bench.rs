@@ -1,6 +1,6 @@
 use shakmaty::Chess;
 
-use crate::{search::search, time};
+use crate::{Configuration, search::search, time};
 
 const POSITIONS: [(&str, isize); 3] = [
     ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 8),
@@ -19,11 +19,12 @@ pub fn bench() {
             .into_position(shakmaty::CastlingMode::Standard)
             .unwrap();
         let tt = crate::search::tt::TT::new(1 << 24);
-        let (score, pv, count) = search(
+        let (score, _pv, count) = search(
             position,
             Vec::new(),
             time::Deadline::Depth(depth as usize),
             &tt,
+            &Configuration { threads: 1 },
             &mut |_, _, _, _| {},
         );
         println!("FEN: {}", fen);

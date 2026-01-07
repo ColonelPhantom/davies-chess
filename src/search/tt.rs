@@ -67,7 +67,7 @@ impl TT {
         }
     }
 
-    pub fn write(&self, key: u64, data: TTEntry) {
+    pub fn write(&self, key: u64, data: TTEntry, replace_always: bool) {
         let index = (key % self.0.len() as u64) as usize;
         let entry = (key & 0xFFFFFF0000000000) // basically << 40 but keeping the high part
             | ((data.depth as u64) << 32)
@@ -75,7 +75,27 @@ impl TT {
             | ((data.from as u64) << 10)
             | ((data.to as u64) << 4)
             | ((data.score_type as u64) << 2);
+        if replace_always {
+            self.0[index].store(entry, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+        loop {
+            let old_entry = self.0[index].load(std::sync::atomic::Ordering::Relaxed);
+            if old_entry >> 40 != key >> 40 || (entry >> 32) >= (old_entry >> 32) {
+                // Replace only if new entry has higher/equal depth or different key
+                let res = self.0[index].compare_exchange(
+                    old_entry,
+                    entry,
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                if res.is_ok() {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
         self.0[index].store(entry, std::sync::atomic::Ordering::Relaxed);
     }
-
 }
