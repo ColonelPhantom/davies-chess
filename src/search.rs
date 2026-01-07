@@ -257,14 +257,7 @@ fn alphabeta(
         };
         let (mut score, mut sub_pv);
         // TODO: what if we don't expect to find a raising move?
-        if node_type == NodeType::All {
-            (score, sub_pv) = alphabeta(pos, hist, this_depth, -beta, -alpha, g, t);
-        } else {
-            (score, sub_pv) = alphabeta(pos.clone(), hist.clone(), this_depth, -alpha - 1, -alpha, g, t);
-            if -score > alpha && beta - alpha > 1 {
-                (score, sub_pv) = alphabeta(pos, hist, this_depth, -beta, -alpha, g, t);
-            }
-        }
+        (score, sub_pv) = alphabeta(pos, hist, this_depth, -beta, -alpha, g, t);
         if score == -32768 {
             // out of time
             return (-32768, Vec::new());
