@@ -111,6 +111,14 @@ pub fn eval(position: &shakmaty::Chess) -> i16 {
         }
     }
 
+    // let white_pawns = position.board().pawns() & position.board().by_color(Color::White);
+    // let black_pawns = position.board().pawns() & position.board().by_color(Color::Black);
+    // let white_blockers = white_pawns.shift(8) & position.board().by_color(Color::Black);
+    // let black_blockers = black_pawns.shift(-8) & position.board().by_color(Color::White);
+
+    // score -= 35 * white_blockers.count() as i16;
+    // score += 35 * black_blockers.count() as i16;
+
     // let mobility = position.legal_moves().len() as i16;
     // let opp_mobility = position.clone().swap_turn().map(|p| p.legal_moves().len() as i16).unwrap_or(0);
 
