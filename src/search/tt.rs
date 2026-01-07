@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 
 use shakmaty::Move;
 
@@ -37,18 +37,21 @@ pub struct TTEntry {
     pub score_type: ScoreType,
 }
 
-pub struct TT(Vec<AtomicU64>);
+pub struct TT{
+    tt: Vec<AtomicU64>,
+    full: AtomicUsize,
+}
 
 impl TT {
     pub fn new(size: usize) -> Self {
         let mut v = Vec::new();
         v.resize_with(size, || AtomicU64::new(0));
-        TT(v)
+        TT{ tt: v, full: AtomicUsize::new(0) }
     }
 
     pub fn get(&self, moves: &[Move], key: u64) -> Option<TTEntry> {
-        let index = (key % self.0.len() as u64) as usize;
-        let entry = self.0[index].load(std::sync::atomic::Ordering::Relaxed);
+        let index = (key % self.tt.len() as u64) as usize;
+        let entry = self.tt[index].load(std::sync::atomic::Ordering::Relaxed);
         if entry >> 40 == (key >> 40) {
             let depth = ((entry >> 32) & 0xFF) as u8;
             let value = ((entry >> 16) & 0xFFFF) as i16;
@@ -68,14 +71,20 @@ impl TT {
     }
 
     pub fn write(&self, key: u64, data: TTEntry) {
-        let index = (key % self.0.len() as u64) as usize;
+        let index = (key % self.tt.len() as u64) as usize;
         let entry = (key & 0xFFFFFF0000000000) // basically << 40 but keeping the high part
             | ((data.depth as u64) << 32)
             | ((data.value.cast_unsigned() as u64) << 16)
             | ((data.from as u64) << 10)
             | ((data.to as u64) << 4)
             | ((data.score_type as u64) << 2);
-        self.0[index].store(entry, std::sync::atomic::Ordering::Relaxed);
+        let oldentry = self.tt[index].swap(entry, std::sync::atomic::Ordering::Relaxed);
+        if oldentry == 0 {
+            self.full.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    pub fn hashfull(&self) -> usize {
+        self.full.load(std::sync::atomic::Ordering::Relaxed) * 1000 / self.tt.len()
     }
 
 }

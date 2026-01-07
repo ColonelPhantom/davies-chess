@@ -173,6 +173,7 @@ where
                             score: Some(ruci::ScoreWithBound { kind: score, bound: None }),
                             nodes: Some(nodes as usize),
                             nps: Some(nps as usize),
+                            hash_full: Some(tt.hashfull() as usize),
                             time: Some(elapsed as usize),
                             ..Default::default()
                         };
