@@ -82,7 +82,7 @@ pub fn eval_piece(sq: Square, color: Color, role: Role) -> i16 {
         shakmaty::Role::Bishop => 330,
         shakmaty::Role::Rook => 500,
         shakmaty::Role::Queen => 900,
-        shakmaty::Role::King => 0, // both sides have 1 king always
+        shakmaty::Role::King => 20000, // both sides have 1 king always
     };
 
     let piece_idx: usize = role.into();
@@ -104,10 +104,14 @@ pub fn eval(position: &shakmaty::Chess) -> i16 {
     for (sq, piece) in position.board() {
         let piece_value = eval_piece(sq, piece.color, piece.role);
 
+        let atts = position.board().attacks_from(sq).count() as i16;
+        let att_bonus = if piece_value == 0 { 0 } else { 1200 * atts / piece_value };
+        // Bonus if piece can attack; bigger bonus for less valuable pieces
+
         if piece.color == position.turn() {
-            score += piece_value;
+            score += piece_value + att_bonus;
         } else {
-            score -= piece_value;
+            score -= piece_value + att_bonus;
         }
     }
 
