@@ -19,7 +19,7 @@ pub fn bench() {
             .into_position(shakmaty::CastlingMode::Standard)
             .unwrap();
         let tt = crate::search::tt::TT::new(1 << 24);
-        let (score, pv, count) = search(
+        let (score, _pv, count) = search(
             position,
             Vec::new(),
             time::Deadline::Depth(depth as usize),

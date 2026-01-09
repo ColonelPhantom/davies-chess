@@ -9,7 +9,6 @@ use crate::{
     time,
     util::sort::LazySort,
 };
-use arrayvec::ArrayVec;
 use shakmaty::{
     Chess, Move, Position,
     zobrist::{Zobrist64, ZobristHash},
@@ -41,7 +40,7 @@ enum MoveOrderKey {
     Quiet(i16),        // development value
 }
 
-fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, t: &ThreadState) -> MoveOrderKey {
+fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, _t: &ThreadState) -> MoveOrderKey {
     // TT-move first
     if let Some(tte) = tte
         && move_match_tt(m, &tte)
@@ -72,7 +71,7 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, t: &ThreadState) -> Mov
         let value_new = eval_piece(m.to(), pos.turn(), role_to);
         let devel = value_new - value_old;
 
-        let hist = t.butterfly[pos.turn() as usize][m.from().unwrap() as usize][m.to() as usize];
+        // let hist = t.butterfly[pos.turn() as usize][m.from().unwrap() as usize][m.to() as usize];
         // MoveOrderKey::Quiet(-(devel + hist / 16))
         MoveOrderKey::Quiet(-devel)
         // MoveOrderKey::Quiet(-(devel + hist))
@@ -228,18 +227,11 @@ fn alphabeta(
     let mut best_move = moves[0].clone();
     let mut node_type = NodeType::All;
     let mut moves = LazySort::new(&moves, |m| move_key(&position, tt_entry, m, t));
-    while let Some((key, mv)) = moves.next() {
+    while let Some((_key, mv)) = moves.next() {
         let mut pos = position.clone();
         pos.play_unchecked(mv);
         let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
 
-        let this_depth = if let MoveOrderKey::Quiet(penalty) = key && depth > 3 && penalty > 0 {
-            child_depth - 1
-            // child_depth - (penalty as isize / 128).clamp(1, child_depth - 2)
-        } else {
-            child_depth
-        };
-        // TODO: what if we don't expect to find a raising move?
         let (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g, t);
         if score == -32768 {
             // out of time
