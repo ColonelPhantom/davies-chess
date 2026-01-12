@@ -329,10 +329,15 @@ pub fn search(
     let mut local = ThreadState {
         butterfly: [[[0; 64]; 64]; 2],
     };
-    for d in 0.. {
-        let alpha = i16::MIN + 1;
-        let beta = i16::MAX;
-        let (new_score, new_pv) = alphabeta(position.clone(), history.clone(), d, alpha, beta, &global, &mut local);
+    for d in 1.. {
+        let alpha = score - 50;
+        let beta = score + 50;
+        let (asp_score, asp_pv) = alphabeta(position.clone(), history.clone(), d, alpha, beta, &global, &mut local);
+        let (new_score, new_pv) = if asp_score > alpha && asp_score < beta {
+            (asp_score, asp_pv)
+        } else {
+            alphabeta(position.clone(), history.clone(), d, i16::MIN + 1, i16::MAX - 1, &global, &mut local)
+        };
         if new_score == -32768 {
             // out of time
             callback(65535, convert_score(score), &pv, &global.nodes);
