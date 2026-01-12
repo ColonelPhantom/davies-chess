@@ -10,8 +10,7 @@ use crate::{
     util::sort::LazySort,
 };
 use shakmaty::{
-    Chess, Move, Position,
-    zobrist::{Zobrist64, ZobristHash},
+    Chess, Move, Position, Square, zobrist::{Zobrist64, ZobristHash}
 };
 
 pub mod tt;
@@ -56,7 +55,8 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, _t: &ThreadState) -> Mo
 
     if let Some(captured) = m.capture() {
         // for captures, order by MVV-LVA
-        let victim_value = eval_piece(m.to(), pos.turn().other(), captured);
+        let victim_pos = if m.is_en_passant() { Square::from_coords(m.to().file(), m.from().unwrap().rank()) } else { m.to() };
+        let victim_value = eval_piece(victim_pos, pos.turn().other(), captured);
         let aggressor_value = eval_piece(
             m.from().unwrap(),
             pos.turn(),

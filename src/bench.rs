@@ -4,7 +4,7 @@ use crate::{search::search, time};
 
 const POSITIONS: [(&str, isize); 3] = [
     ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 8),
-    ("r1bq1rk1/4ppbp/p1pp1np1/1P2n3/2B1PB2/2NP1N1P/1PP2PP1/R2QR1K1 b - - 0 11", 8),
+    ("r1bq1rk1/4ppbp/p1pp1np1/1P2n3/2B1PB2/2NP1N1P/1PP2PP1/R2QR1K1 b - - 0 11", 7),
     ("8/k7/3p4/p2P1p2/P2P1P2/8/8/K7 w - ", 30),
 ];
 
