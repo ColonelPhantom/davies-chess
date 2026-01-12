@@ -101,7 +101,9 @@ fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &Search
         if best > alpha {
             alpha = best;
         }
-        (position.capture_moves(), best)
+        let mut moves = position.legal_moves();
+        moves.retain(|m| m.is_promotion() || m.is_capture());
+        (moves, best)
     } else {
         // If checked, search all moves and forbid standing pat
         // Instead, assume checkmate unless a move can let us escape
