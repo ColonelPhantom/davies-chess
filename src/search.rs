@@ -111,7 +111,7 @@ fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &Search
     };
 
     let moves = LazySort::new(&moves, |m| move_key(&position, None, m, t));
-    for (_key ,mv) in moves {
+    for (_i, _key ,mv) in moves {
         let mut pos = position.clone();
         pos.play_unchecked(&mv);
         let score = -qsearch(pos, -beta, -alpha, global, t);
@@ -229,7 +229,7 @@ fn alphabeta(
     let mut best_move = moves[0].clone();
     let mut node_type = NodeType::All;
     let mut moves = LazySort::new(&moves, |m| move_key(&position, tt_entry, m, t));
-    while let Some((_key, mv)) = moves.next() {
+    while let Some((_i, _key, mv)) = moves.next() {
         let mut pos = position.clone();
         pos.play_unchecked(mv);
         let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };

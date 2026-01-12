@@ -11,7 +11,7 @@ impl <'a, T, C: Ord> LazySort<'a, T, C> {
     {
         let keys = data.iter().map(|item| key_fn(item)).collect();
         let seen = vec![false; data.len()];
-        Self { data, keys, seen }
+        Self { data, keys, seen}
     }
 
     pub fn seen(&self) -> impl Iterator<Item=&'a T> {
@@ -20,12 +20,14 @@ impl <'a, T, C: Ord> LazySort<'a, T, C> {
 }
 
 impl<'a, T, C> Iterator for LazySort<'a, T, C> where C: PartialOrd + Copy {
-    type Item = (C, &'a T);
+    type Item = (usize, C, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut best: Option<usize> = None;
+        let mut index = 0;
         for i in 0..self.data.len() {
             if self.seen[i] {
+                index += 1;
                 continue;
             }
             if let Some(best_idx) = best {
@@ -38,10 +40,9 @@ impl<'a, T, C> Iterator for LazySort<'a, T, C> where C: PartialOrd + Copy {
         }
         if let Some(best_idx) = best {
             self.seen[best_idx] = true;
-            Some((self.keys[best_idx], &self.data[best_idx]))
+            Some((index, self.keys[best_idx], &self.data[best_idx]))
         } else {
             None
-            
         }
     }
 }
