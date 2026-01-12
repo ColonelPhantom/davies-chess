@@ -139,6 +139,7 @@ fn alphabeta(
     position: shakmaty::Chess,
     mut history: Vec<shakmaty::Chess>,
     depth: isize,
+    ply: isize,
     mut alpha: i16,
     beta: i16,
     g: &SearchState,
@@ -185,6 +186,7 @@ fn alphabeta(
                 position.clone(),
                 history.clone(),
                 depth_internal,
+                ply,
                 alpha,
                 beta,
                 g,
@@ -234,7 +236,7 @@ fn alphabeta(
         pos.play_unchecked(mv);
         let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
 
-        let (score, sub_pv) = alphabeta(pos, hist, child_depth, -beta, -alpha, g, t);
+        let (score, sub_pv) = alphabeta(pos, hist, child_depth, ply + 1, -beta, -alpha, g, t);
         if score == -32768 {
             // out of time
             return (-32768, Vec::new());
@@ -332,11 +334,11 @@ pub fn search(
     for d in 1.. {
         let alpha = score - 50;
         let beta = score + 50;
-        let (asp_score, asp_pv) = alphabeta(position.clone(), history.clone(), d, alpha, beta, &global, &mut local);
+        let (asp_score, asp_pv) = alphabeta(position.clone(), history.clone(), d, 0, alpha, beta, &global, &mut local);
         let (new_score, new_pv) = if asp_score > alpha && asp_score < beta {
             (asp_score, asp_pv)
         } else {
-            alphabeta(position.clone(), history.clone(), d, i16::MIN + 1, i16::MAX - 1, &global, &mut local)
+            alphabeta(position.clone(), history.clone(), d, 0, i16::MIN + 1, i16::MAX - 1, &global, &mut local)
         };
         if new_score == -32768 {
             // out of time
