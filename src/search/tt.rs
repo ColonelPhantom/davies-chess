@@ -78,7 +78,11 @@ impl TT {
             | ((data.from as u64) << 10)
             | ((data.to as u64) << 4)
             | ((data.score_type as u64) << 2);
-        let oldentry = self.tt[index].swap(entry, std::sync::atomic::Ordering::Relaxed);
+        let oldentry = self.tt[index].load(std::sync::atomic::Ordering::Acquire);
+        if oldentry & 0xFFFFFF0000000000 == key & 0xFFFFFF0000000000 && data.depth < ((entry >> 32) & 0xFF) as u8 {
+            return;
+        }
+        self.tt[index].store(entry, std::sync::atomic::Ordering::Release);
         if oldentry == 0 {
             self.full.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }

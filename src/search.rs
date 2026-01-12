@@ -203,7 +203,7 @@ fn alphabeta(
         // - it is not an upper bound, and the score >= beta (so the real score also >= beta)
         // - it is not a lower bound, and the score < alpha (so the real score also < alpha)
         let cut = tte.score_type != ScoreType::UpperBound && tte.value >= beta
-            || tte.score_type != ScoreType::LowerBound && tte.value < alpha;
+            || tte.score_type != ScoreType::LowerBound && tte.value <= alpha;
 
         if cut {
             return (tte.value, Vec::new());
@@ -272,6 +272,12 @@ fn alphabeta(
         }
     }
 
+    if best_value < -32500 {
+        best_value += 1;
+    }
+    if best_value > 32500 {
+        best_value -= 1;
+    }
     g.tt.write(
         zob.0,
         TTEntry {
@@ -286,12 +292,6 @@ fn alphabeta(
             },
         },
     );
-    if best_value < -32500 {
-        best_value += 1;
-    }
-    if best_value > 32500 {
-        best_value -= 1;
-    }
     return (best_value, pv);
 }
 
