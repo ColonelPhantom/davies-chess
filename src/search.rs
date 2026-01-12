@@ -36,10 +36,10 @@ impl NodeCount {
 enum MoveOrderKey {
     TTMove(i16),
     Capture(i16, i16), // victim value, aggressor value
-    Quiet(i16),        // development value
+    Quiet(i32),        // development value
 }
 
-fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, _t: &ThreadState) -> MoveOrderKey {
+fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, g: &SearchState, t: &ThreadState) -> MoveOrderKey {
     // TT-move first
     if let Some(tte) = tte
         && move_match_tt(m, &tte)
@@ -69,17 +69,18 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, _t: &ThreadState) -> Mo
         let role_to = m.promotion().unwrap_or(role);
         let value_old = eval_piece(m.from().unwrap(), pos.turn(), role);
         let value_new = eval_piece(m.to(), pos.turn(), role_to);
-        let devel = value_new - value_old;
+        let devel = (value_new - value_old) as i32;
 
-        // let hist = t.butterfly[pos.turn() as usize][m.from().unwrap() as usize][m.to() as usize];
+        let hist = t.butterfly[pos.turn() as usize][m.from().unwrap() as usize][m.to() as usize] as i32;
         // MoveOrderKey::Quiet(-(devel + hist / 16))
-        MoveOrderKey::Quiet(-devel)
+        MoveOrderKey::Quiet(-((devel * g.config.eval_factor as i32) + (hist * g.config.hist_factor as i32)))
         // MoveOrderKey::Quiet(-(devel + hist))
     }
 }
 
 // Actual search implementation
 struct SearchState<'a> {
+    config: &'a crate::Configuration,
     tt: &'a TT,
     nodes: NodeCount,
     deadline: time::Deadline,
@@ -90,8 +91,8 @@ struct ThreadState {
     butterfly: [[[i16; 64]; 64]; 2],
 }
 
-fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &SearchState, t: &mut ThreadState) -> i16 {
-    global.nodes.qnodes.fetch_add(1, Relaxed);
+fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, g: &SearchState, t: &mut ThreadState) -> i16 {
+    g.nodes.qnodes.fetch_add(1, Relaxed);
 
     let (moves, mut best) = if !position.is_check() {
         let best = eval(&position);
@@ -110,11 +111,11 @@ fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, global: &Search
         (position.legal_moves(), -32700)
     };
 
-    let moves = LazySort::new(&moves, |m| move_key(&position, None, m, t));
+    let moves = LazySort::new(&moves, |m| move_key(&position, None, m, g, t));
     for (_i, _key ,mv) in moves {
         let mut pos = position.clone();
         pos.play_unchecked(&mv);
-        let score = -qsearch(pos, -beta, -alpha, global, t);
+        let score = -qsearch(pos, -beta, -alpha, g, t);
         if score >= beta {
             return score;
         }
@@ -230,7 +231,7 @@ fn alphabeta(
     let mut best_value = i16::MIN;
     let mut best_move = moves[0].clone();
     let mut node_type = NodeType::All;
-    let mut moves = LazySort::new(&moves, |m| move_key(&position, tt_entry, m, t));
+    let mut moves = LazySort::new(&moves, |m| move_key(&position, tt_entry, m, g, t));
     while let Some((_i, _key, mv)) = moves.next() {
         let mut pos = position.clone();
         pos.play_unchecked(mv);
@@ -258,7 +259,7 @@ fn alphabeta(
                 // Update butterfly table
                 if !mv.is_capture() {
                     const MAX_HISTORY: i32 = 16384;
-                    let bonus = (depth as i32 * depth as i32).clamp(-MAX_HISTORY, MAX_HISTORY) as i32;
+                    let bonus = (300 * depth as i32 - 250).clamp(-MAX_HISTORY, MAX_HISTORY);
                     let col = position.turn() as usize;
                     let from = mv.from().unwrap() as usize;
                     let to = mv.to() as usize;
@@ -314,11 +315,13 @@ pub fn search(
     history: Vec<shakmaty::Chess>,
     deadline: time::Deadline,
     tt: &TT,
+    config: &crate::Configuration,
     callback: &mut dyn FnMut(isize, ruci::Score, &Vec<Move>, &NodeCount),
 ) -> (ruci::Score, Vec<Move>, NodeCount) {
     let mut score = eval(&position);
     let mut pv = Vec::new();
     let global = SearchState {
+        config,
         tt,
         nodes: NodeCount {
             nodes: AtomicU64::new(0),

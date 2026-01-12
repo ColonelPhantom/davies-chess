@@ -42,6 +42,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct Configuration {
     threads: usize,
+    hist_factor: i32,
+    eval_factor: i32,
 }
 // struct Option {
 //     name: &'static str,
@@ -66,7 +68,7 @@ where
         position: Chess::new(),
         history: Vec::new(),
         tt: RwLock::new(search::tt::TT::new(1 << 20)),
-        config: Configuration { threads: 1 },
+        config: Configuration { threads: 1, hist_factor: 1, eval_factor: 1 },
     };
 
     gui.send_string("engine started")?;
@@ -99,6 +101,14 @@ where
                     } else {
                         state.config.threads = num_threads;
                     }
+                }
+                "HistFactor" => {
+                    let hist_factor: i32 = opt.value.and_then(|s| s.parse().ok()).unwrap();
+                    state.config.hist_factor = hist_factor;
+                }
+                "EvalFactor" => {
+                    let eval_factor: i32 = opt.value.and_then(|s| s.parse().ok()).unwrap();
+                    state.config.eval_factor = eval_factor;
                 }
                 _ => {
                     gui.send_string(&format!("unknown option: {}", opt.name))?;
@@ -158,6 +168,7 @@ where
                     state.history.clone(),
                     deadline,
                     &tt,
+                    &state.config,
                     &mut |depth, score, pv, count| {
                         let elapsed = starttime.elapsed().as_millis() as u64;
                         let nodes = count.count();
@@ -213,6 +224,14 @@ where
                 gui.send(Option {
                     name: std::borrow::Cow::Borrowed("Threads"),
                     r#type: ruci::OptionType::Spin { default: Some(1), min: Some(1), max: Some(1) },
+                })?;
+                gui.send(Option {
+                    name: std::borrow::Cow::Borrowed("HistFactor"),
+                    r#type: ruci::OptionType::Spin { default: Some(1), min: Some(0), max: Some(32768) },
+                })?;
+                gui.send(Option {
+                    name: std::borrow::Cow::Borrowed("EvalFactor"),
+                    r#type: ruci::OptionType::Spin { default: Some(1), min: Some(0), max: Some(32768) },
                 })?;
                 gui.send(UciOk)?;
             }

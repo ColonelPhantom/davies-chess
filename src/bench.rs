@@ -10,6 +10,12 @@ const POSITIONS: [(&str, isize); 5] = [
     ("8/k7/3p4/p2P1p2/P2P1P2/8/8/K7 w - ", 30),
 ];
 
+const CONFIG: crate::Configuration = crate::Configuration {
+    threads: 1,
+    hist_factor: 1,
+    eval_factor: 256,
+};
+
 pub fn bench() {
     let start = std::time::Instant::now();
     let mut total_nodes = 0u64;
@@ -26,6 +32,7 @@ pub fn bench() {
             Vec::new(),
             time::Deadline::Depth(depth as usize),
             &tt,
+            &CONFIG,
             &mut |_, _, _, _| {},
         );
         println!("FEN: {}", fen);
