@@ -45,6 +45,12 @@ struct Configuration {
     hist_factor: i32,
     eval_factor: i32,
 }
+
+const DEFAULT_CONFIG: Configuration = Configuration {
+    threads: 1,
+    hist_factor: 1,
+    eval_factor: 1,
+};
 // struct Option {
 //     name: &'static str,
 //     typ: OptionType,
@@ -68,7 +74,7 @@ where
         position: Chess::new(),
         history: Vec::new(),
         tt: RwLock::new(search::tt::TT::new(1 << 20)),
-        config: Configuration { threads: 1, hist_factor: 1, eval_factor: 1 },
+        config: DEFAULT_CONFIG
     };
 
     gui.send_string("engine started")?;
@@ -223,15 +229,15 @@ where
                 })?;
                 gui.send(Option {
                     name: std::borrow::Cow::Borrowed("Threads"),
-                    r#type: ruci::OptionType::Spin { default: Some(1), min: Some(1), max: Some(1) },
+                    r#type: ruci::OptionType::Spin { default: Some(DEFAULT_CONFIG.threads as i64), min: Some(1), max: Some(1) },
                 })?;
                 gui.send(Option {
                     name: std::borrow::Cow::Borrowed("HistFactor"),
-                    r#type: ruci::OptionType::Spin { default: Some(1), min: Some(0), max: Some(32768) },
+                    r#type: ruci::OptionType::Spin { default: Some(DEFAULT_CONFIG.hist_factor as i64), min: Some(0), max: Some(32768) },
                 })?;
                 gui.send(Option {
                     name: std::borrow::Cow::Borrowed("EvalFactor"),
-                    r#type: ruci::OptionType::Spin { default: Some(1), min: Some(0), max: Some(32768) },
+                    r#type: ruci::OptionType::Spin { default: Some(DEFAULT_CONFIG.eval_factor as i64), min: Some(0), max: Some(32768) },
                 })?;
                 gui.send(UciOk)?;
             }
