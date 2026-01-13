@@ -265,7 +265,7 @@ fn alphabeta(
                     let to = mv.to() as usize;
                     t.butterfly[col][from][to] += (bonus - (t.butterfly[col][from][to] as i32 * bonus.abs()) / (MAX_HISTORY)) as i16;
 
-                    for fail in moves.seen().filter(|m| !m.is_capture()) {
+                    for fail in moves.seen().filter(|m| !m.is_capture() && *m != mv) {
                         let from = fail.from().unwrap() as usize;
                         let to = fail.to() as usize;
                         t.butterfly[col][from][to] -= (bonus - (t.butterfly[col][from][to] as i32 * bonus.abs()) / (MAX_HISTORY)) as i16;
