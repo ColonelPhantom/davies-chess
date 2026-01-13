@@ -42,14 +42,10 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct Configuration {
     threads: usize,
-    hist_factor: i32,
-    eval_factor: i32,
 }
 
 const DEFAULT_CONFIG: Configuration = Configuration {
     threads: 1,
-    hist_factor: 1,
-    eval_factor: 1,
 };
 // struct Option {
 //     name: &'static str,
@@ -107,14 +103,6 @@ where
                     } else {
                         state.config.threads = num_threads;
                     }
-                }
-                "HistFactor" => {
-                    let hist_factor: i32 = opt.value.and_then(|s| s.parse().ok()).unwrap();
-                    state.config.hist_factor = hist_factor;
-                }
-                "EvalFactor" => {
-                    let eval_factor: i32 = opt.value.and_then(|s| s.parse().ok()).unwrap();
-                    state.config.eval_factor = eval_factor;
                 }
                 _ => {
                     gui.send_string(&format!("unknown option: {}", opt.name))?;
@@ -230,14 +218,6 @@ where
                 gui.send(Option {
                     name: std::borrow::Cow::Borrowed("Threads"),
                     r#type: ruci::OptionType::Spin { default: Some(DEFAULT_CONFIG.threads as i64), min: Some(1), max: Some(1) },
-                })?;
-                gui.send(Option {
-                    name: std::borrow::Cow::Borrowed("HistFactor"),
-                    r#type: ruci::OptionType::Spin { default: Some(DEFAULT_CONFIG.hist_factor as i64), min: Some(0), max: Some(32768) },
-                })?;
-                gui.send(Option {
-                    name: std::borrow::Cow::Borrowed("EvalFactor"),
-                    r#type: ruci::OptionType::Spin { default: Some(DEFAULT_CONFIG.eval_factor as i64), min: Some(0), max: Some(32768) },
                 })?;
                 gui.send(UciOk)?;
             }

@@ -43,7 +43,7 @@ enum MoveOrderKey {
     Quiet(i32),        // development value
 }
 
-fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, g: &SearchState, t: &ThreadState) -> MoveOrderKey {
+fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, _g: &SearchState, t: &ThreadState) -> MoveOrderKey {
     // TT-move first
     if let Some(tte) = tte
         && move_match_tt(m, &tte)
@@ -68,17 +68,8 @@ fn move_key(pos: &Chess, tte: Option<TTEntry>, m: &Move, g: &SearchState, t: &Th
         );
         MoveOrderKey::Capture(-victim_value, -aggressor_value)
     } else {
-        // for quiet moves, order by piece development (looking at PSQTs)
-        let role = pos.board().role_at(m.from().unwrap()).unwrap();
-        let role_to = m.promotion().unwrap_or(role);
-        let value_old = eval_piece(m.from().unwrap(), pos.turn(), role);
-        let value_new = eval_piece(m.to(), pos.turn(), role_to);
-        let devel = (value_new - value_old) as i32;
-
         let hist = t.butterfly[pos.turn() as usize][m.from().unwrap() as usize][m.to() as usize] as i32;
-        // MoveOrderKey::Quiet(-(devel + hist / 16))
-        MoveOrderKey::Quiet(-((devel * g.config.eval_factor as i32) + (hist * g.config.hist_factor as i32)))
-        // MoveOrderKey::Quiet(-(devel + hist))
+        MoveOrderKey::Quiet(-hist)
     }
 }
 
