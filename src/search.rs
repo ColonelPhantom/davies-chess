@@ -1,6 +1,6 @@
 use std::{
     cmp::min,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
+    sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering::Relaxed},
     time::Instant,
 };
 
@@ -21,11 +21,15 @@ pub struct NodeCount {
     pub nodes: AtomicU64,
     pub leaves: AtomicU64,
     pub qnodes: AtomicU64,
+    pub seldepth: AtomicIsize,
 }
 
 impl NodeCount {
     pub fn count(&self) -> u64 {
         self.nodes.load(Relaxed) + self.qnodes.load(Relaxed) - self.leaves.load(Relaxed)
+    }
+    pub fn seldepth(&self) -> isize {
+        self.seldepth.load(Relaxed)
     }
 }
 
@@ -147,6 +151,7 @@ fn alphabeta(
     t: &mut ThreadState,
 ) -> (i16, Vec<Move>) {
     g.nodes.nodes.fetch_add(1, Relaxed);
+    g.nodes.seldepth.fetch_max(ply, Relaxed);
 
     // Check if we are done; go to qsearch if so
     if depth <= 0 {
@@ -327,6 +332,7 @@ pub fn search(
             nodes: AtomicU64::new(0),
             leaves: AtomicU64::new(0),
             qnodes: AtomicU64::new(0),
+            seldepth: AtomicIsize::new(0),
         },
         deadline,
         stop: AtomicBool::new(false),

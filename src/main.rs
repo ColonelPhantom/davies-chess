@@ -180,7 +180,7 @@ where
                         let nodes = count.count();
                         let nps = nodes * 1000 / elapsed.max(1);
                         let info = Info {
-                            depth: Some(Depth { depth: depth as usize, seldepth: None }),
+                            depth: Some(Depth { depth: depth as usize, seldepth: Some(count.seldepth() as usize) }),
                             pv: Cow::Owned(
                                 pv.iter()
                                     .rev()
