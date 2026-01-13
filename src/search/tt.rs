@@ -49,6 +49,13 @@ impl TT {
         TT{ tt: v, full: AtomicUsize::new(0) }
     }
 
+    pub fn reset(&mut self) {
+        for entry in &self.tt {
+            entry.store(0, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.full.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn get(&self, moves: &[Move], key: u64) -> Option<TTEntry> {
         let index = (key % self.tt.len() as u64) as usize;
         let entry = self.tt[index].load(std::sync::atomic::Ordering::Relaxed);

@@ -87,8 +87,8 @@ struct SearchState<'a> {
     stop: AtomicBool,
 }
 
-struct ThreadState {
-    butterfly: [[[i16; 64]; 64]; 2],
+struct ThreadState<'a> {
+    butterfly: &'a mut [[[i16; 64]; 64]; 2],
 }
 
 fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, g: &SearchState, t: &mut ThreadState) -> i16 {
@@ -265,7 +265,7 @@ fn alphabeta(
                     let to = mv.to() as usize;
                     t.butterfly[col][from][to] += (bonus - (t.butterfly[col][from][to] as i32 * bonus.abs()) / (MAX_HISTORY)) as i16;
 
-                    for fail in moves.seen().filter(|m| !m.is_capture()) {
+                    for fail in moves.seen().filter(|m| !m.is_capture() && *m != mv) {
                         let from = fail.from().unwrap() as usize;
                         let to = fail.to() as usize;
                         t.butterfly[col][from][to] -= (bonus - (t.butterfly[col][from][to] as i32 * bonus.abs()) / (MAX_HISTORY)) as i16;
@@ -316,6 +316,7 @@ pub fn search(
     deadline: time::Deadline,
     tt: &TT,
     config: &crate::Configuration,
+    butterfly: &mut [[[i16; 64]; 64]; 2],
     callback: &mut dyn FnMut(isize, ruci::Score, &Vec<Move>, &NodeCount),
 ) -> (ruci::Score, Vec<Move>, NodeCount) {
     let mut score = eval(&position);
@@ -332,7 +333,7 @@ pub fn search(
         stop: AtomicBool::new(false),
     };
     let mut local = ThreadState {
-        butterfly: [[[0; 64]; 64]; 2],
+        butterfly: butterfly,
     };
     for d in 1.. {
         let alpha = score - 50;
