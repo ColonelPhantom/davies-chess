@@ -33,6 +33,7 @@ mod util;
 
 struct State {
     position: Chess,
+    butterfly: [[[i16; 64]; 64]; 2],
     history: Vec<Chess>,
     tt: RwLock<search::tt::TT>,
     config: Configuration,
@@ -68,6 +69,7 @@ where
     let mut gui = Gui { engine, gui };
     let mut state = State {
         position: Chess::new(),
+        butterfly: [[[0; 64]; 64]; 2],
         history: Vec::new(),
         tt: RwLock::new(search::tt::TT::new(1 << 20)),
         config: DEFAULT_CONFIG
@@ -109,6 +111,12 @@ where
                 }
             },
             Message::Quit(_) => return Ok(()),
+            Message::UciNewGame(_) => {
+                state.tt.write().unwrap().reset();
+                state.butterfly = [[[0; 64]; 64]; 2];
+                state.position = Chess::new();
+                state.history.clear();
+            }
             Message::Position(position) => {
                 let (position, moves) = match position {
                     ruci::Position::StartPos { moves } => (Chess::new(), moves),
@@ -163,6 +171,7 @@ where
                     deadline,
                     &tt,
                     &state.config,
+                    &mut state.butterfly,
                     &mut |depth, score, pv, count| {
                         let elapsed = starttime.elapsed().as_millis() as u64;
                         let nodes = count.count();

@@ -82,8 +82,8 @@ struct SearchState<'a> {
     stop: AtomicBool,
 }
 
-struct ThreadState {
-    butterfly: [[[i16; 64]; 64]; 2],
+struct ThreadState<'a> {
+    butterfly: &'a mut [[[i16; 64]; 64]; 2],
     pv: [[Option<Move>; 256]; 256],
 }
 
@@ -327,6 +327,7 @@ pub fn search(
     deadline: time::Deadline,
     tt: &TT,
     config: &crate::Configuration,
+    butterfly: &mut [[[i16; 64]; 64]; 2],
     callback: &mut dyn FnMut(isize, ruci::Score, &Vec<Move>, &NodeCount),
 ) -> (ruci::Score, Vec<Move>, NodeCount) {
     let mut score = eval(&position);
@@ -344,7 +345,7 @@ pub fn search(
         stop: AtomicBool::new(false),
     };
     let mut local = ThreadState {
-        butterfly: [[[0; 64]; 64]; 2],
+        butterfly: butterfly,
         pv: std::array::from_fn(|_| std::array::from_fn(|_| None)),
     };
     for d in 1.. {

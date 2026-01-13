@@ -29,6 +29,7 @@ pub fn bench() {
             time::Deadline::Depth(depth as usize),
             &tt,
             &crate::DEFAULT_CONFIG,
+            &mut [[[0; 64]; 64]; 2],
             &mut |_, _, _, _| {},
         );
         println!("FEN: {}", fen);
