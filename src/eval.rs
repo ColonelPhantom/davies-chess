@@ -205,6 +205,10 @@ pub fn eval(position: &shakmaty::Chess) -> i16 {
             Role::Queen => 4,
             Role::King => 0,
         };
+
+        let atts = position.board().attacks_from(sq).count() as i16;
+        mg[piece.color as usize] += if base_mg_val == 0 { 0 } else { 1200 * atts / base_mg_val };
+        eg[piece.color as usize] += if base_eg_val == 0 { 0 } else { 1200 * atts / base_eg_val };
     }
 
     // let white_pawns = position.board().pawns() & position.board().by_color(Color::White);
