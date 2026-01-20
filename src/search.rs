@@ -84,6 +84,7 @@ struct SearchState<'a> {
 
 struct ThreadState {
     butterfly: [[[i16; 64]; 64]; 2],
+    pv: [[Option<Move>; 256]; 256],
 }
 
 fn qsearch(position: shakmaty::Chess, mut alpha: i16, beta: i16, g: &SearchState, t: &mut ThreadState) -> i16 {
@@ -140,14 +141,15 @@ fn alphabeta(
     beta: i16,
     g: &SearchState,
     t: &mut ThreadState,
-) -> (i16, Vec<Move>) {
+) -> i16 {
     g.nodes.nodes.fetch_add(1, Relaxed);
     g.nodes.seldepth.fetch_max(ply, Relaxed);
+    t.pv[ply as usize][0] = None;
 
     // Check if we are done; go to qsearch if so
     if depth <= 0 {
         g.nodes.leaves.fetch_add(1, Relaxed);
-        return (qsearch(position, alpha, beta, g, t), Vec::new());
+        return qsearch(position, alpha, beta, g, t);
     }
 
     // Check if we are out of time
@@ -155,16 +157,16 @@ fn alphabeta(
         .check_hard(Instant::now(), g.nodes.count() as usize)
         || g.stop.load(Relaxed)
     {
-        return (-32768, Vec::new());
+        return -32768;
     }
 
     // Generate moves; detect checkmate/stalemate
     let moves = position.legal_moves();
     if moves.is_empty() {
         if position.is_check() {
-            return (-32700, Vec::new());
+            return -32700;
         } else {
-            return (0, Vec::new());
+            return 0;
         }
     }
 
@@ -207,7 +209,7 @@ fn alphabeta(
             || tte.score_type != ScoreType::LowerBound && tte.value <= alpha;
 
         if cut {
-            return (tte.value, Vec::new());
+            return tte.value;
         }
     }
 
@@ -215,15 +217,14 @@ fn alphabeta(
     let reps = history.iter().filter(|h| **h == position).count();
     if reps >= 2 {
         // draw
-        return (0, Vec::new());
+        return 0;
     }
     // fifty-move rule draw detection
     if position.halfmoves() >= 100 {
-        return (0, Vec::new());
+        return 0;
     }
     history.push(position.clone());
 
-    let mut pv = Vec::new();
     let mut best_value = i16::MIN;
     let mut best_move = moves[0].clone();
     let mut node_type = NodeType::All;
@@ -233,21 +234,15 @@ fn alphabeta(
         pos.play_unchecked(mv);
         let hist = if mv.is_zeroing() { Vec::new() } else { history.clone() };
 
-        let (score, sub_pv) = alphabeta(pos, hist, child_depth, ply + 1, -beta, -alpha, g, t);
+        let score = alphabeta(pos, hist, child_depth, ply + 1, -beta, -alpha, g, t);
         if score == -32768 {
             // out of time
-            return (-32768, Vec::new());
+            return score;
         }
         let score = -score;
         if score > best_value {
             best_value = score;
             best_move = mv.clone();
-            if score > alpha {
-                alpha = score;
-                pv = sub_pv;
-                pv.push(mv.clone());
-                node_type = NodeType::PV;
-            }
             if score >= beta {
                 // fail-soft
                 node_type = NodeType::Cut;
@@ -270,6 +265,15 @@ fn alphabeta(
 
                 break;
             }
+            if score > alpha {
+                alpha = score;
+                node_type = NodeType::PV;
+                t.pv[ply as usize][0] = Some(mv.clone());
+                for i in 0..255 {
+                    t.pv[ply as usize][i + 1] = t.pv[ply as usize + 1][i].clone();
+                }
+            }
+
         }
     }
 
@@ -293,7 +297,7 @@ fn alphabeta(
             },
         },
     );
-    return (best_value, pv);
+    return best_value;
 }
 
 fn convert_score(score: i16) -> ruci::Score {
@@ -304,6 +308,17 @@ fn convert_score(score: i16) -> ruci::Score {
     } else {
         ruci::Score::Centipawns(score as isize)
     }
+}
+
+fn collect_pv(t: &ThreadState) -> Vec<Move> {
+    let mut pv = Vec::new();
+    for i in 0..256 {
+        match &t.pv[0][i] {
+            Some(mv) => pv.push(mv.clone()),
+            None => break,
+        }
+    }
+    pv
 }
 
 pub fn search(
@@ -330,13 +345,14 @@ pub fn search(
     };
     let mut local = ThreadState {
         butterfly: [[[0; 64]; 64]; 2],
+        pv: std::array::from_fn(|_| std::array::from_fn(|_| None)),
     };
     for d in 1.. {
         let alpha = score - 50;
         let beta = score + 50;
-        let (asp_score, asp_pv) = alphabeta(position.clone(), history.clone(), d, 0, alpha, beta, &global, &mut local);
-        let (new_score, new_pv) = if asp_score > alpha && asp_score < beta {
-            (asp_score, asp_pv)
+        let asp_score = alphabeta(position.clone(), history.clone(), d, 0, alpha, beta, &global, &mut local);
+        let new_score = if asp_score > alpha && asp_score < beta {
+            asp_score 
         } else {
             alphabeta(position.clone(), history.clone(), d, 0, i16::MIN + 1, i16::MAX - 1, &global, &mut local)
         };
@@ -345,8 +361,8 @@ pub fn search(
             callback(65535, convert_score(score), &pv, &global.nodes);
             break;
         }
+        pv = collect_pv(&local);
         score = new_score;
-        pv = new_pv;
         callback(d, convert_score(score), &pv, &global.nodes);
         if !pv.is_empty()
             && global.deadline.check_soft(
@@ -358,5 +374,6 @@ pub fn search(
             break;
         }
     }
+
     (convert_score(score), pv, global.nodes)
 }

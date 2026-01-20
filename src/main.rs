@@ -171,7 +171,6 @@ where
                             depth: Some(Depth { depth: depth as usize, seldepth: Some(count.seldepth() as usize) }),
                             pv: Cow::Owned(
                                 pv.iter()
-                                    .rev()
                                     .map(|m| m.to_uci(CastlingMode::Standard))
                                     .collect(),
                             ),
@@ -185,7 +184,6 @@ where
                         gui.send(info).unwrap();
                     },
                 );
-                pv.reverse();
                 let bestmove = pv.first().cloned();
                 if let Some(mv) = bestmove {
                     let best_move = BestMove::Normal(NormalBestMove {
